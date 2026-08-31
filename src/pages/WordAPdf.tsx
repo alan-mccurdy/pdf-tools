@@ -89,7 +89,7 @@ function wParseCell(tc: string): WParagraph[][] {
   const paras: WParagraph[][] = []
   const re = /<w:p\b[\s\S]*?<\/w:p>/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(tc)) !== null) paras.push(wParseParagraph(m[0]))
+  while ((m = re.exec(tc)) !== null) paras.push([wParseParagraph(m[0])])
   return paras
 }
 
@@ -289,7 +289,7 @@ export default function WordAPdf() {
 
   const handleDownload = () => {
     if (!pdfBytes || !file) return
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+    const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
