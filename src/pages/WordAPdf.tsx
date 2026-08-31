@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import JSZip from 'jszip'
@@ -279,13 +279,18 @@ export default function WordAPdf() {
       const bytes = await wDocxToPdf(file)
       setPdfBytes(bytes)
       setPreviewPage(1)
-      await showPreview(bytes, 1)
     } catch (err: any) {
       alert('Error: ' + err.message)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (pdfBytes && previewRef.current) {
+      showPreview(pdfBytes, 1)
+    }
+  }, [pdfBytes, showPreview])
 
   const handleDownload = () => {
     if (!pdfBytes || !file) return
