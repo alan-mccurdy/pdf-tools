@@ -44,10 +44,28 @@ interface DrawStroke {
   page: number
 }
 
+interface ExistingTextItem {
+  id: number
+  text: string
+  originalText: string
+  x: number
+  y: number
+  width: number
+  height: number
+  fontSize: number
+  fontFamily: string
+  fontColor: string
+  bold: boolean
+  italic: boolean
+  page: number
+  edited: boolean
+}
+
 interface EditorState {
   boxes: TextBox[]
   images: ImageBox[]
   strokes: DrawStroke[]
+  existingTexts?: ExistingTextItem[]
 }
 
 /* ── IndexedDB persistence ──────────────────────────────── */
@@ -138,6 +156,8 @@ export default function EditarPdf() {
   const [scale, setScale] = useState(1.5)
   const [selectedBox, setSelectedBox] = useState<number | null>(null)
   const [selectedImage, setSelectedImage] = useState<number | null>(null)
+  const [existingTexts, setExistingTexts] = useState<ExistingTextItem[]>([])
+  const [selectedExisting, setSelectedExisting] = useState<number | null>(null)
 
   // Toolbar state
   const [fontSize, setFontSize] = useState(14)
@@ -172,12 +192,12 @@ export default function EditarPdf() {
   useEffect(() => {
     if (!file) return
     const timer = setTimeout(() => {
-      saveState(file.name, { boxes, images, strokes })
+      saveState(file.name, { boxes, images, strokes, existingTexts })
       setShowSaved(true)
       setTimeout(() => setShowSaved(false), 1500)
     }, 500)
     return () => clearTimeout(timer)
-  }, [boxes, images, strokes, file])
+  }, [boxes, images, strokes, existingTexts, file])
 
   // Load persisted state when file changes
   useEffect(() => {
@@ -187,11 +207,13 @@ export default function EditarPdf() {
         setBoxes(saved.boxes || [])
         setImages(saved.images || [])
         setStrokes(saved.strokes || [])
+        if (saved.existingTexts) setExistingTexts(saved.existingTexts)
         // Update nextId
         const maxId = Math.max(
           ...saved.boxes.map(b => b.id),
           ...saved.images.map(i => i.id),
           ...saved.strokes.map(s => s.id),
+          ...(saved.existingTexts || []).map(t => t.id),
           0,
         )
         nextId.current = maxId + 1
@@ -216,6 +238,91 @@ export default function EditarPdf() {
       await page.render({ canvasContext: ctx, viewport } as never).promise
     }
     render()
+  }, [file, currentPage, scale])
+
+  // Extract existing text items from PDF page
+  useEffect(() => {
+    if (!file) return
+    const extract = async () => {
+      const bytes = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+      const page = await pdf.getPage(currentPage + 1)
+      const textContent = await page.getTextContent()
+      const items = textContent.items as any[]
+      if (!items.length) { setExistingTexts(prev => prev.filter(t => t.page !== currentPage)); return }
+
+      // Group by Y-coordinate (within 3px tolerance at scale) to form lines
+      const Y_TOLERANCE = 3
+      const lines: { items: any[]; y: number }[] = []
+      for (const item of items) {
+        if (!item.str?.trim()) continue
+        const tx = item.transform
+        // transform: [scaleX, skewX, skewY, scaleY, translateX, translateY]
+        const itemY = tx[5]
+        const existing = lines.find(l => Math.abs(l.y - itemY) < Y_TOLERANCE)
+        if (existing) {
+          existing.items.push(item)
+        } else {
+          lines.push({ items: [item], y: itemY })
+        }
+      }
+
+      // Sort items in each line by X position
+      for (const line of items.length ? lines : []) {
+        line.items.sort((a: any, b: any) => a.transform[4] - b.transform[4])
+      }
+
+      // Check if we already have persisted edits for this page
+      const existingForPage = existingTexts.filter(t => t.page === currentPage)
+      const existingMap = new Map(existingForPage.map(t => [t.originalText + '|' + Math.round(t.y), t]))
+
+      const newItems: ExistingTextItem[] = []
+      let id = nextId.current
+      for (const line of lines) {
+        const combinedText = line.items.map((i: any) => i.str).join(' ')
+        const firstItem = line.items[0]
+        const tx = firstItem.transform
+        const fontSize = Math.abs(tx[3]) || 12
+        const x = tx[4] * scale
+        const y = tx[5] * scale
+        // Calculate width from last item
+        const lastItem = line.items[line.items.length - 1]
+        const endX = (lastItem.transform[4] + (lastItem.width || 0)) * scale
+        const width = Math.max(endX - x, 60)
+        const height = fontSize * scale * 1.3
+
+        // Detect bold from font name
+        const fontName = firstItem.fontName || ''
+        const isBold = /bold/i.test(fontName)
+        const isItalic = /italic|oblique/i.test(fontName)
+
+        // Check if this line was previously edited
+        const key = combinedText + '|' + Math.round(y)
+        const prev = existingMap.get(key)
+        if (prev) {
+          newItems.push({ ...prev, id: prev.id })
+        } else {
+          newItems.push({
+            id: id++,
+            text: combinedText,
+            originalText: combinedText,
+            x, y, width, height, fontSize,
+            fontFamily: 'Helvetica',
+            fontColor: '#000000',
+            bold: isBold,
+            italic: isItalic,
+            page: currentPage,
+            edited: false,
+          })
+        }
+      }
+      nextId.current = id
+      setExistingTexts(prev => {
+        const other = prev.filter(t => t.page !== currentPage)
+        return [...other, ...newItems]
+      })
+    }
+    extract().catch(() => {})
   }, [file, currentPage, scale])
 
   // Render draw strokes on canvas overlay
@@ -248,7 +355,7 @@ export default function EditarPdf() {
   // ── Undo/Redo ──────────────────────────────────────────
 
   const pushHistory = useCallback(() => {
-    const state: EditorState = { boxes, images, strokes }
+    const state: EditorState = { boxes, images, strokes, existingTexts }
     setHistory(prev => {
       const newHist = prev.slice(0, historyIndex + 1)
       newHist.push(state)
@@ -256,7 +363,7 @@ export default function EditarPdf() {
       return newHist
     })
     setHistoryIndex(prev => Math.min(prev + 1, 49))
-  }, [boxes, images, strokes, historyIndex])
+  }, [boxes, images, strokes, existingTexts, historyIndex])
 
   const undo = useCallback(() => {
     if (historyIndex <= 0) return
@@ -264,6 +371,7 @@ export default function EditarPdf() {
     setBoxes(prev.boxes)
     setImages(prev.images)
     setStrokes(prev.strokes)
+    if (prev.existingTexts) setExistingTexts(prev.existingTexts)
     setHistoryIndex(i => i - 1)
   }, [history, historyIndex])
 
@@ -273,6 +381,7 @@ export default function EditarPdf() {
     setBoxes(next.boxes)
     setImages(next.images)
     setStrokes(next.strokes)
+    if (next.existingTexts) setExistingTexts(next.existingTexts)
     setHistoryIndex(i => i + 1)
   }, [history, historyIndex])
 
@@ -291,10 +400,15 @@ export default function EditarPdf() {
         setImages(prev => prev.filter(i => i.id !== selectedImage))
         setSelectedImage(null)
       }
+      if (e.key === 'Delete' && selectedExisting !== null) {
+        pushHistory()
+        setExistingTexts(prev => prev.filter(t => t.id !== selectedExisting))
+        setSelectedExisting(null)
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, selectedBox, selectedImage, pushHistory])
+  }, [undo, redo, selectedBox, selectedImage, selectedExisting, pushHistory])
 
   // ── Text box handlers ──────────────────────────────────
 
@@ -302,6 +416,7 @@ export default function EditarPdf() {
     if (mode !== 'text') return
     if ((e.target as HTMLElement).closest('.editor-box')) return
     if ((e.target as HTMLElement).closest('.editor-image')) return
+    if ((e.target as HTMLElement).closest('.existing-text')) return
     const rect = overlayRef.current!.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
@@ -328,6 +443,27 @@ export default function EditarPdf() {
     pushHistory()
     setBoxes(prev => prev.filter(b => b.id !== id))
     setSelectedBox(prev => prev === id ? null : prev)
+  }, [pushHistory])
+
+  // ── Existing text handlers ─────────────────────────────
+
+  const updateExistingText = useCallback((id: number, text: string) => {
+    setExistingTexts(prev => prev.map(t =>
+      t.id === id ? { ...t, text, edited: text !== t.originalText } : t
+    ))
+  }, [])
+
+  const applyToExisting = useCallback((id: number, updates: Partial<ExistingTextItem>) => {
+    pushHistory()
+    setExistingTexts(prev => prev.map(t =>
+      t.id === id ? { ...t, ...updates, edited: true } : t
+    ))
+  }, [pushHistory])
+
+  const deleteExisting = useCallback((id: number) => {
+    pushHistory()
+    setExistingTexts(prev => prev.filter(t => t.id !== id))
+    setSelectedExisting(null)
   }, [pushHistory])
 
   // ── Image handlers ─────────────────────────────────────
@@ -467,10 +603,14 @@ export default function EditarPdf() {
   // ── Apply formatting to selected box ───────────────────
 
   const applyToSelected = useCallback((updates: Partial<TextBox>) => {
-    if (selectedBox === null) return
-    pushHistory()
-    setBoxes(prev => prev.map(b => b.id === selectedBox ? { ...b, ...updates } : b))
-  }, [selectedBox, pushHistory])
+    if (selectedBox !== null) {
+      pushHistory()
+      setBoxes(prev => prev.map(b => b.id === selectedBox ? { ...b, ...updates } : b))
+    }
+    if (selectedExisting !== null) {
+      applyToExisting(selectedExisting, updates as Partial<ExistingTextItem>)
+    }
+  }, [selectedBox, selectedExisting, pushHistory, applyToExisting])
 
   // ── Download ───────────────────────────────────────────
 
@@ -491,6 +631,31 @@ export default function EditarPdf() {
           fontCache[key] = await pdfDoc.embedFont(std)
         }
         return fontCache[key]
+      }
+
+      // White-out and redraw edited existing text
+      for (const item of existingTexts) {
+        if (!item.edited || !item.text.trim()) continue
+        const page = pdfDoc.getPage(item.page)
+        const { height } = page.getSize()
+        // White rectangle over original text
+        page.drawRectangle({
+          x: item.x / scale,
+          y: height - item.y / scale - item.height / scale,
+          width: item.width / scale,
+          height: item.height / scale,
+          color: rgb(1, 1, 1),
+          borderWidth: 0,
+        })
+        // Draw edited text
+        const font = await getFont(item.fontFamily, item.bold, item.italic)
+        page.drawText(item.text, {
+          x: item.x / scale,
+          y: height - item.y / scale - (item.fontSize * 0.85),
+          font,
+          size: item.fontSize,
+          color: hexToRgb(item.fontColor),
+        })
       }
 
       // Draw text boxes
@@ -552,7 +717,8 @@ export default function EditarPdf() {
 
   const currentBoxes = boxes.filter(b => b.page === currentPage)
   const currentImages = images.filter(i => i.page === currentPage)
-  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0
+  const currentExisting = existingTexts.filter(t => t.page === currentPage)
+  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0 || existingTexts.some(t => t.edited)
 
   /* ── Toolbar ──────────────────────────────────────────── */
 
@@ -880,6 +1046,67 @@ export default function EditarPdf() {
                   >
                     {box.text}
                   </div>
+                </div>
+              ))}
+
+              {/* Existing text items (editable) */}
+              {currentExisting.map(item => (
+                <div
+                  key={`ext-${item.id}`}
+                  className={`existing-text absolute group ${selectedExisting === item.id ? 'ring-2 ring-emerald-400' : ''}`}
+                  style={{ left: item.x, top: item.y }}
+                  onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
+                >
+                  {/* Drag handle */}
+                  <div
+                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
+                  >
+                    <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                    </svg>
+                    <span className="ml-1 text-[8px]" style={{ color: 'var(--accent)' }}>original</span>
+                  </div>
+                  {/* Delete button */}
+                  <button
+                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
+                    style={{ background: 'var(--danger)' }}
+                    onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  {/* Editable text */}
+                  <div
+                    contentEditable
+                    suppressContentEditableWarning
+                    className="min-w-[40px] min-h-[16px] px-1 py-0.5 outline-none whitespace-pre-wrap"
+                    style={{
+                      fontSize: item.fontSize * scale * 0.75,
+                      fontFamily: item.fontFamily,
+                      color: item.edited ? '#059669' : 'var(--text-primary)',
+                      backgroundColor: item.edited ? 'rgba(5,150,105,0.08)' : 'rgba(255,255,255,0.03)',
+                      fontWeight: item.bold ? 'bold' : 'normal',
+                      fontStyle: item.italic ? 'italic' : 'normal',
+                      width: item.width,
+                      border: selectedExisting === item.id
+                        ? '1.5px solid #10b981'
+                        : '1px dashed rgba(16,185,129,0.3)',
+                      borderRadius: '3px',
+                      lineHeight: 1.3,
+                      backdropFilter: 'blur(2px)',
+                    }}
+                    onInput={e => updateExistingText(item.id, (e.target as HTMLDivElement).textContent || '')}
+                    onFocus={() => setSelectedExisting(item.id)}
+                  >
+                    {item.text}
+                  </div>
+                  {item.edited && (
+                    <span className="absolute -bottom-5 left-0 text-[8px] opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#10b981' }}>
+                      editado
+                    </span>
+                  )}
                 </div>
               ))}
 
