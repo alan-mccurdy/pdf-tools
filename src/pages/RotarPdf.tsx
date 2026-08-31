@@ -42,13 +42,13 @@ export default function RotarPdf() {
       {pages.length > 0 && (
         <div className="mt-4 space-y-4">
           <div className="flex gap-4 items-center">
-            <label className="text-sm text-gray-400">Rotacion:</label>
+            <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>Rotacion:</label>
             {[90, 180, 270].map(deg => (
               <button
                 key={deg}
                 onClick={() => setRotation(deg)}
-                className={`px-4 py-2 rounded-xl border transition-all duration-200
-                  ${rotation === deg ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
+                className={`spatial-btn text-sm ${rotation === deg ? '!border-[var(--accent-strong)] !text-[var(--accent)]' : ''}`}
+                style={rotation === deg ? { background: 'var(--accent-soft)' } : {}}
               >
                 {deg}°
               </button>
@@ -56,18 +56,18 @@ export default function RotarPdf() {
           </div>
 
           <div className="flex gap-4 items-center">
-            <label className="text-sm text-gray-400">Aplicar a:</label>
+            <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>Aplicar a:</label>
             <button
               onClick={() => setApplyTo('all')}
-              className={`px-4 py-2 rounded-xl border transition-all duration-200
-                ${applyTo === 'all' ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
+              className={`spatial-btn text-sm ${applyTo === 'all' ? '!border-[var(--accent-strong)] !text-[var(--accent)]' : ''}`}
+              style={applyTo === 'all' ? { background: 'var(--accent-soft)' } : {}}
             >
               Todas
             </button>
             <button
               onClick={() => setApplyTo('selected')}
-              className={`px-4 py-2 rounded-xl border transition-all duration-200
-                ${applyTo === 'selected' ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
+              className={`spatial-btn text-sm ${applyTo === 'selected' ? '!border-[var(--accent-strong)] !text-[var(--accent)]' : ''}`}
+              style={applyTo === 'selected' ? { background: 'var(--accent-soft)' } : {}}
             >
               Seleccionar
             </button>
@@ -82,7 +82,8 @@ export default function RotarPdf() {
                     s.includes(p.index) ? s.filter(i => i !== p.index) : [...s, p.index]
                   )}
                   className={`w-12 h-12 rounded-xl border text-sm transition-all duration-200
-                    ${selected.includes(p.index) ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
+                    ${selected.includes(p.index) ? 'border-[var(--accent-strong)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                    style={selected.includes(p.index) ? { background: 'var(--accent-soft)', borderColor: 'var(--accent-strong)' } : { background: 'var(--surface-2)', borderColor: 'var(--border-default)' }}
                 >
                   {p.index + 1}
                 </button>

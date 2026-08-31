@@ -37,7 +37,7 @@ export default function EliminarPaginas() {
       <PDFUploader onFiles={f => f[0] && load(f[0])} />
       {pages.length > 0 && (
         <>
-          <p className="text-sm text-gray-400 mt-4">Selecciona las paginas que quieres ELIMINAR:</p>
+          <p className="text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>Selecciona las paginas que quieres ELIMINAR:</p>
           <PageSelector pages={pages} selected={toDelete} onSelect={setToDelete} />
           <DownloadButton
             onClick={handleDownload}

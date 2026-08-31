@@ -50,9 +50,9 @@ export default function UnirPdf() {
       {items.length > 0 && (
         <div className="mt-4 space-y-2">
           {items.map((item, idx) => (
-            <div key={idx} className="flex items-center justify-between glass-card !rounded-xl px-4 py-3">
-              <span className="text-sm text-gray-300">{idx + 1}. {item.name} ({item.pages} pag.)</span>
-              <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-300 text-sm transition-colors">
+            <div key={idx} className="flex items-center justify-between spatial-card-static px-4 py-3">
+              <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{idx + 1}. {item.name} ({item.pages} pag.)</span>
+              <button onClick={() => removeItem(idx)} className="spatial-btn-danger text-sm !py-1 !px-3">
                 Quitar
               </button>
             </div>

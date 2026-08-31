@@ -34,7 +34,7 @@ export default function SepararPdf() {
       <PDFUploader onFiles={f => f[0] && load(f[0])} />
       {pages.length > 0 && (
         <>
-          <p className="text-sm text-gray-400 mt-4">Selecciona las paginas que quieres extraer:</p>
+          <p className="text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>Selecciona las paginas que quieres extraer:</p>
           <PageSelector pages={pages} selected={selected} onSelect={setSelected} />
           <DownloadButton
             onClick={handleDownload}

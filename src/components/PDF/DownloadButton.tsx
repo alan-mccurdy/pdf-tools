@@ -10,7 +10,7 @@ export default function DownloadButton({ onClick, disabled, label = 'Descargar P
     <button
       onClick={onClick}
       disabled={disabled || loading}
-      className="glass-btn-primary mt-6 px-6 py-3 text-lg disabled:opacity-35 disabled:cursor-not-allowed"
+      className="spatial-btn-primary mt-6 px-6 py-3 text-lg disabled:opacity-35 disabled:cursor-not-allowed"
     >
       {loading ? (
         <span className="flex items-center gap-2">

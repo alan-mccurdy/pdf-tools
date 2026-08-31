@@ -93,7 +93,7 @@ export default function InsertarImagenes() {
         <PDFUploader onFiles={f => f[0] && setPdfFile(f[0])} />
 
         <div>
-          <label className="text-sm text-gray-400 block mb-1">Selecciona la imagen a insertar:</label>
+          <label className="text-sm block mb-1" style={{ color: 'var(--text-secondary)' }}>Selecciona la imagen a insertar:</label>
           <input
             type="file"
             accept="image/*"
@@ -125,17 +125,17 @@ export default function InsertarImagenes() {
               <button
                 onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                 disabled={currentPage === 0}
-                className="glass-card !rounded-xl px-3 py-1 text-sm text-gray-400 hover:text-white disabled:opacity-40"
+                className="spatial-btn text-sm"
               >
                 Anterior
               </button>
-              <span className="text-sm text-gray-400 self-center">
+              <span className="text-sm self-center" style={{ color: 'var(--text-secondary)' }}>
                 Pagina {currentPage + 1} de {totalPages}
               </span>
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={currentPage >= totalPages - 1}
-                className="glass-card !rounded-xl px-3 py-1 text-sm text-gray-400 hover:text-white disabled:opacity-40"
+                className="spatial-btn text-sm"
               >
                 Siguiente
               </button>

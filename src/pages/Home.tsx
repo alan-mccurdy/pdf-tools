@@ -5,6 +5,7 @@ const tools = [
   { path: '/editar-pdf', name: 'Editar PDF', desc: 'Escribe texto sobre paginas PDF', icon: 'edit' },
   { path: '/unir-pdf', name: 'Unir PDFs', desc: 'Combina multiples PDFs en uno', icon: 'merge' },
   { path: '/word-a-pdf', name: 'Word a PDF', desc: 'Convierte .docx a PDF', icon: 'convert' },
+  { path: '/pdf-a-word', name: 'PDF a Word', desc: 'Convierte PDF a .docx', icon: 'pdfword' },
   { path: '/separar-pdf', name: 'Separar PDF', desc: 'Extrae paginas de un PDF', icon: 'split' },
   { path: '/rotar-pdf', name: 'Rotar PDF', desc: 'Rota paginas 90/180/270 grados', icon: 'rotate' },
   { path: '/comprimir-pdf', name: 'Comprimir PDF', desc: 'Reduce el tamano de tu PDF', icon: 'compress' },
@@ -54,6 +55,12 @@ function ToolIcon({ icon }: { icon: string }) {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
       </svg>
     ),
+    pdfword: (
+      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 3l6 6m0 0l-6 6m6-6H9" />
+      </svg>
+    ),
   }
   return icons[icon] || null
 }
@@ -70,7 +77,7 @@ export default function Home() {
         <h1 className="text-5xl font-bold mb-4">
           <span className="gradient-text">Editor PDF Online Gratis</span>
         </h1>
-        <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+        <p className="text-xl max-w-2xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
           Herramientas PDF 100% gratis. Tus archivos nunca salen de tu navegador.
         </p>
       </div>
@@ -80,14 +87,15 @@ export default function Home() {
           <Link
             key={tool.path}
             to={tool.path}
-            className="glass-card p-6 group fade-in"
+            className="spatial-card p-6 group fade-in"
             style={{ animationDelay: `${i * 50}ms` }}
           >
-            <div className="w-14 h-14 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-4 text-blue-400 group-hover:bg-blue-500/20 group-hover:text-blue-300 transition-all duration-300">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 transition-all duration-300"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
               <ToolIcon icon={tool.icon} />
             </div>
-            <h2 className="text-lg font-semibold text-white group-hover:text-blue-300 transition-colors">{tool.name}</h2>
-            <p className="text-sm text-gray-500 mt-1">{tool.desc}</p>
+            <h2 className="text-lg font-semibold transition-colors" style={{ color: 'var(--text-primary)' }}>{tool.name}</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{tool.desc}</p>
           </Link>
         ))}
       </div>

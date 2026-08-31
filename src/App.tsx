@@ -10,6 +10,7 @@ import WordAPdf from './pages/WordAPdf'
 import EditarPdf from './pages/EditarPdf'
 import ComprimirPdf from './pages/ComprimirPdf'
 import InsertarImagenes from './pages/InsertarImagenes'
+import PdfAWord from './pages/PdfAWord'
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
           <Route path="/editar-pdf" element={<EditarPdf />} />
           <Route path="/comprimir-pdf" element={<ComprimirPdf />} />
           <Route path="/insertar-imagenes" element={<InsertarImagenes />} />
+          <Route path="/pdf-a-word" element={<PdfAWord />} />
         </Routes>
       </main>
       <Footer />

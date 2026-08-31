@@ -69,12 +69,12 @@ export default function ComprimirPdf() {
 
       {file && (
         <div className="mt-4 space-y-4">
-          <div className="glass-card !rounded-xl px-4 py-3 text-sm text-gray-300">
-            Tamano original: <strong className="text-white">{(originalSize / 1024).toFixed(0)} KB</strong>
+          <div className="spatial-card-static px-4 py-3 text-sm" style={{ color: 'var(--text-primary)' }}>
+            Tamano original: <strong>{(originalSize / 1024).toFixed(0)} KB</strong>
           </div>
 
           <div>
-            <label className="text-sm text-gray-400">
+            <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
               Calidad: {Math.round(quality * 100)}%
             </label>
             <input
@@ -84,9 +84,9 @@ export default function ComprimirPdf() {
               step="0.1"
               value={quality}
               onChange={e => setQuality(parseFloat(e.target.value))}
-              className="w-full mt-1"
+              className="w-full mt-1 accent-sky-300"
             />
-            <div className="flex justify-between text-xs text-gray-500">
+            <div className="flex justify-between text-xs" style={{ color: 'var(--text-tertiary)' }}>
               <span>Mas compression</span>
               <span>Mejor calidad</span>
             </div>

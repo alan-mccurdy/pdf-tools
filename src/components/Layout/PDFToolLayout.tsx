@@ -23,9 +23,9 @@ export default function PDFToolLayout({ title, description, keyword, children }:
 
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 min-w-0">
-          <h1 className="text-3xl font-bold mb-2 text-white">{keyword}</h1>
-          <p className="text-gray-400 mb-6">{description}</p>
-          <div className="glass-card p-6">
+          <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>{keyword}</h1>
+          <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>{description}</p>
+          <div className="spatial-card-static p-6">
             {children}
           </div>
         </div>
