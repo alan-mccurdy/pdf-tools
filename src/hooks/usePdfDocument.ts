@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { PDFDocument } from 'pdf-lib'
-import { loadPdf, PdfPage } from '../utils/pdfHelpers'
+import { loadPdf, type PdfPage } from '../utils/pdfHelpers'
 
 export function usePdfDocument() {
   const [pdfDoc, setPdfDoc] = useState<PDFDocument | null>(null)
