@@ -85,11 +85,11 @@ function wParseParagraph(block: string): WParagraph {
   return { align, runs: wParseRuns(block), pageBreak, spBefore, spAfter, indLeft, indRight, indFirst, indHang, isList }
 }
 
-function wParseCell(tc: string): WParagraph[][] {
-  const paras: WParagraph[][] = []
+function wParseCell(tc: string): WParagraph[] {
+  const paras: WParagraph[] = []
   const re = /<w:p\b[\s\S]*?<\/w:p>/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(tc)) !== null) paras.push([wParseParagraph(m[0])])
+  while ((m = re.exec(tc)) !== null) paras.push(wParseParagraph(m[0]))
   return paras
 }
 
