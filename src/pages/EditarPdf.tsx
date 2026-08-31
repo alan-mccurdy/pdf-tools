@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
@@ -90,17 +90,6 @@ const FONT_FAMILIES = [
   'Helvetica', 'Arial', 'Times New Roman', 'Courier New',
   'Georgia', 'Verdana', 'Impact', 'Comic Sans MS',
   'Trebuchet MS', 'Palatino',
-]
-
-const FONT_COLORS = [
-  { name: 'Negro', value: '#000000' },
-  { name: 'Gris oscuro', value: '#374151' },
-  { name: 'Azul', value: '#2563eb' },
-  { name: 'Rojo', value: '#dc2626' },
-  { name: 'Verde', value: '#16a34a' },
-  { name: 'Morado', value: '#9333ea' },
-  { name: 'Naranja', value: '#ea580c' },
-  { name: 'Rosa', value: '#db2777' },
 ]
 
 const HIGHLIGHT_COLORS = [

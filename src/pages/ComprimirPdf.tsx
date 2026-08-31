@@ -9,15 +9,14 @@ interface CompressionPreset {
   label: string
   useObjectStreams: boolean
   addDefaultPage: boolean
-  objectStreams: boolean
   description: string
 }
 
 const PRESETS: CompressionPreset[] = [
-  { name: 'screen', label: 'Pantalla', useObjectStreams: true, addDefaultPage: false, objectStreams: true, description: 'Maxima compresion, ideal para pantalla' },
-  { name: 'ebook', label: 'E-book', useObjectStreams: true, addDefaultPage: false, objectStreams: true, description: 'Balance entre tamano y calidad' },
-  { name: 'printer', label: 'Impresora', useObjectStreams: false, addDefaultPage: false, objectStreams: false, description: 'Calidad para impresion' },
-  { name: 'none', label: 'Sin compresion', useObjectStreams: false, addDefaultPage: false, objectStreams: false, description: 'Solo optimizar estructura' },
+  { name: 'screen', label: 'Pantalla', useObjectStreams: true, addDefaultPage: false, description: 'Maxima compresion, ideal para pantalla' },
+  { name: 'ebook', label: 'E-book', useObjectStreams: true, addDefaultPage: false, description: 'Balance entre tamano y calidad' },
+  { name: 'printer', label: 'Impresora', useObjectStreams: false, addDefaultPage: false, description: 'Calidad para impresion' },
+  { name: 'none', label: 'Sin compresion', useObjectStreams: false, addDefaultPage: false, description: 'Solo optimizar estructura' },
 ]
 
 export default function ComprimirPdf() {
@@ -58,7 +57,6 @@ export default function ComprimirPdf() {
       const compressedBytes = await pdfDoc.save({
         useObjectStreams: selectedPreset.useObjectStreams,
         addDefaultPage: selectedPreset.addDefaultPage,
-        objectStreams: selectedPreset.objectStreams,
       })
 
       const compressedBlob = new Blob([new Uint8Array(compressedBytes)], { type: 'application/pdf' })

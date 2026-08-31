@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
-import DownloadButton from '../components/PDF/DownloadButton'
+
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -18,7 +18,6 @@ export default function PdfAWord() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [converting, setConverting] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [pageCount, setPageCount] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -48,7 +47,7 @@ export default function PdfAWord() {
     try {
       // Lazy load docx library (~740KB)
       const docxModule = await import('docx')
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, convertInchesToTwip } = docxModule
+      const { Document, Packer, Paragraph, TextRun, convertInchesToTwip } = docxModule
 
       const bytes = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
@@ -59,7 +58,7 @@ export default function PdfAWord() {
         const textContent = await page.getTextContent()
 
         // Group text items into lines by Y-coordinate
-        const items = textContent.items.filter((item: any) => item.str.trim())
+        const items = textContent.items.filter((item: any) => item.str && item.str.trim() && item.transform) as any[]
         const lineMap = new Map<number, any[]>()
 
         for (const item of items) {
@@ -151,7 +150,7 @@ export default function PdfAWord() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { setFile(null); setPreviewUrl(null) }}
+                onClick={() => setFile(null)}
                 className="spatial-btn text-sm"
               >
                 Quitar
