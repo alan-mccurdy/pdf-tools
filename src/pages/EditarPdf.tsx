@@ -32,7 +32,7 @@ export default function EditarPdf() {
       canvas.width = viewport.width
       canvas.height = viewport.height
       const ctx = canvas.getContext('2d')!
-      await page.render({ canvasContext: ctx, viewport }).promise
+      await page.render({ canvasContext: ctx, viewport } as never).promise
     }
     render()
   }, [file, currentPage])
@@ -68,7 +68,7 @@ export default function EditarPdf() {
       }
 
       const newBytes = await pdfDoc.save()
-      const blob = new Blob([newBytes], { type: 'application/pdf' })
+      const blob = new Blob([new Uint8Array(newBytes)], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

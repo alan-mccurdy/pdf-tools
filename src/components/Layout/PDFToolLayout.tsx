@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Helmet } from 'react-helmet-async'
 import AdSlot from '../Ads/AdSlot'
 

@@ -9,10 +9,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 interface PDFPreviewProps {
   file: File | null
-  maxPages?: number
 }
 
-export default function PDFPreview({ file, maxPages = 5 }: PDFPreviewProps) {
+export default function PDFPreview({ file }: PDFPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -35,7 +34,7 @@ export default function PDFPreview({ file, maxPages = 5 }: PDFPreviewProps) {
       canvas.width = viewport.width
       canvas.height = viewport.height
       const ctx = canvas.getContext('2d')!
-      await page.render({ canvasContext: ctx, viewport }).promise
+      await page.render({ canvasContext: ctx, viewport } as never).promise
     }
 
     render()

@@ -36,7 +36,7 @@ export default function ComprimirPdf() {
         canvas.width = viewport.width
         canvas.height = viewport.height
         const ctx = canvas.getContext('2d')!
-        await page.render({ canvasContext: ctx, viewport }).promise
+        await page.render({ canvasContext: ctx, viewport } as never).promise
 
         const imgData = canvas.toDataURL('image/jpeg', quality)
         const imgBytes = Uint8Array.from(atob(imgData.split(',')[1]), c => c.charCodeAt(0))
@@ -46,7 +46,7 @@ export default function ComprimirPdf() {
       }
 
       const compressedBytes = await newPdf.save()
-      const blob = new Blob([compressedBytes], { type: 'application/pdf' })
+      const blob = new Blob([new Uint8Array(compressedBytes)], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
