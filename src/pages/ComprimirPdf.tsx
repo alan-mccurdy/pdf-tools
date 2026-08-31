@@ -1,68 +1,91 @@
 import { useState } from 'react'
-import * as pdfjsLib from 'pdfjs-dist'
 import { PDFDocument } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+interface CompressionPreset {
+  name: string
+  label: string
+  useObjectStreams: boolean
+  addDefaultPage: boolean
+  objectStreams: boolean
+  description: string
+}
+
+const PRESETS: CompressionPreset[] = [
+  { name: 'screen', label: 'Pantalla', useObjectStreams: true, addDefaultPage: false, objectStreams: true, description: 'Maxima compresion, ideal para pantalla' },
+  { name: 'ebook', label: 'E-book', useObjectStreams: true, addDefaultPage: false, objectStreams: true, description: 'Balance entre tamano y calidad' },
+  { name: 'printer', label: 'Impresora', useObjectStreams: false, addDefaultPage: false, objectStreams: false, description: 'Calidad para impresion' },
+  { name: 'none', label: 'Sin compresion', useObjectStreams: false, addDefaultPage: false, objectStreams: false, description: 'Solo optimizar estructura' },
+]
 
 export default function ComprimirPdf() {
   const [file, setFile] = useState<File | null>(null)
-  const [quality, setQuality] = useState(0.5)
+  const [preset, setPreset] = useState('ebook')
   const [loading, setLoading] = useState(false)
   const [originalSize, setOriginalSize] = useState(0)
+  const [resultSize, setResultSize] = useState<number | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   const handleFiles = (files: File[]) => {
     if (files[0]) {
       setFile(files[0])
       setOriginalSize(files[0].size)
+      setResultSize(null)
+      setPreviewUrl(null)
     }
   }
 
-  const handleDownload = async () => {
+  const handleCompress = async () => {
     if (!file) return
     setLoading(true)
     try {
       const arrayBuffer = await file.arrayBuffer()
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-      const newPdf = await PDFDocument.create()
+      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true })
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const viewport = page.getViewport({ scale: quality * 2 })
-
-        const canvas = document.createElement('canvas')
-        canvas.width = viewport.width
-        canvas.height = viewport.height
-        const ctx = canvas.getContext('2d')!
-        await page.render({ canvasContext: ctx, viewport } as never).promise
-
-        const imgData = canvas.toDataURL('image/jpeg', quality)
-        const imgBytes = Uint8Array.from(atob(imgData.split(',')[1]), c => c.charCodeAt(0))
-        const img = await newPdf.embedJpg(imgBytes)
-        const newPage = newPdf.addPage([page.getViewport({ scale: 1 }).width, page.getViewport({ scale: 1 }).height])
-        newPage.drawImage(img, { x: 0, y: 0, width: newPage.getWidth(), height: newPage.getHeight() })
+      // Remove metadata for screen/ebook presets
+      if (preset === 'screen' || preset === 'ebook') {
+        pdfDoc.setTitle('')
+        pdfDoc.setAuthor('')
+        pdfDoc.setSubject('')
+        pdfDoc.setKeywords([])
+        pdfDoc.setProducer('')
+        pdfDoc.setCreator('')
       }
 
-      const compressedBytes = await newPdf.save()
-      const blob = new Blob([new Uint8Array(compressedBytes)], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `comprimido-${file.name}`
-      a.click()
+      const selectedPreset = PRESETS.find(p => p.name === preset)!
+      const compressedBytes = await pdfDoc.save({
+        useObjectStreams: selectedPreset.useObjectStreams,
+        addDefaultPage: selectedPreset.addDefaultPage,
+        objectStreams: selectedPreset.objectStreams,
+      })
 
-      alert(`Original: ${(originalSize / 1024).toFixed(0)} KB\nComprimido: ${(compressedBytes.length / 1024).toFixed(0)} KB`)
+      const compressedBlob = new Blob([new Uint8Array(compressedBytes)], { type: 'application/pdf' })
+      setResultSize(compressedBytes.length)
+
+      // Create preview
+      const previewUrlVal = URL.createObjectURL(compressedBlob)
+      setPreviewUrl(previewUrlVal)
     } finally {
       setLoading(false)
     }
   }
 
+  const handleDownload = async () => {
+    if (!file || !previewUrl) return
+    const a = document.createElement('a')
+    a.href = previewUrl
+    a.download = `comprimido-${file.name}`
+    a.click()
+  }
+
+  const savings = resultSize && originalSize ? Math.round((1 - resultSize / originalSize) * 100) : 0
+
   return (
     <PDFToolLayout
       title="Comprimir PDF Online Gratis"
-      description="Reduce el tamano de tu PDF manteniendo la calidad. Gratis y sin subir archivos."
+      description="Reduce el tamano de tu PDF manteniendo la calidad. Gratis y sin subir archivos a servidores."
       keyword="Comprimir PDF"
     >
       <PDFUploader onFiles={handleFiles} />
@@ -74,25 +97,51 @@ export default function ComprimirPdf() {
           </div>
 
           <div>
-            <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Calidad: {Math.round(quality * 100)}%
+            <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-primary)' }}>
+              Preset de compresion
             </label>
-            <input
-              type="range"
-              min="0.1"
-              max="1"
-              step="0.1"
-              value={quality}
-              onChange={e => setQuality(parseFloat(e.target.value))}
-              className="w-full mt-1 accent-sky-300"
-            />
-            <div className="flex justify-between text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              <span>Mas compression</span>
-              <span>Mejor calidad</span>
+            <div className="grid grid-cols-2 gap-2">
+              {PRESETS.map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => setPreset(p.name)}
+                  className={`spatial-btn text-left px-3 py-2 text-sm ${preset === p.name ? '!border-[var(--accent)] !bg-[var(--accent-soft)]' : ''}`}
+                >
+                  <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{p.label}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{p.description}</div>
+                </button>
+              ))}
             </div>
           </div>
 
-          <DownloadButton onClick={handleDownload} loading={loading} />
+          {!resultSize ? (
+            <DownloadButton onClick={handleCompress} loading={loading} label="Comprimir PDF" />
+          ) : (
+            <div className="space-y-3">
+              <div className="spatial-card-static px-4 py-3 text-sm" style={{ color: 'var(--text-primary)' }}>
+                <div>Original: <strong>{(originalSize / 1024).toFixed(0)} KB</strong></div>
+                <div>Comprimido: <strong>{(resultSize / 1024).toFixed(0)} KB</strong></div>
+                <div className="mt-1">
+                  {savings > 0 ? (
+                    <span className="text-green-400">-{savings}% de reduccion</span>
+                  ) : savings < 0 ? (
+                    <span className="text-yellow-400">+{Math.abs(savings)}% (el archivo creció)</span>
+                  ) : (
+                    <span className="text-[var(--text-secondary)]">Sin cambio significativo</span>
+                  )}
+                </div>
+              </div>
+
+              <DownloadButton onClick={handleDownload} loading={false} label="Descargar comprimido" />
+
+              <button
+                onClick={() => { setResultSize(null); setPreviewUrl(null) }}
+                className="spatial-btn text-sm w-full"
+              >
+                Probar otro preset
+              </button>
+            </div>
+          )}
         </div>
       )}
     </PDFToolLayout>
