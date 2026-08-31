@@ -5,6 +5,8 @@ import Home from './pages/Home'
 import SepararPdf from './pages/SepararPdf'
 import RotarPdf from './pages/RotarPdf'
 import EliminarPaginas from './pages/EliminarPaginas'
+import UnirPdf from './pages/UnirPdf'
+import WordAPdf from './pages/WordAPdf'
 
 function App() {
   return (
@@ -16,6 +18,8 @@ function App() {
           <Route path="/separar-pdf" element={<SepararPdf />} />
           <Route path="/rotar-pdf" element={<RotarPdf />} />
           <Route path="/eliminar-paginas" element={<EliminarPaginas />} />
+          <Route path="/unir-pdf" element={<UnirPdf />} />
+          <Route path="/word-a-pdf" element={<WordAPdf />} />
         </Routes>
       </main>
       <Footer />
