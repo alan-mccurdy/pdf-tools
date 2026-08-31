@@ -250,7 +250,7 @@ async function renderPdfPreview(pdfBytes: Uint8Array, canvas: HTMLCanvasElement,
   const typedArray = new Uint8Array(pdfBytes)
   const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise
   const page = await pdf.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 1.2 })
+  const viewport = page.getViewport({ scale: 2.0 })
   canvas.width = viewport.width
   canvas.height = viewport.height
   const ctx = canvas.getContext('2d')!
@@ -367,7 +367,7 @@ export default function WordAPdf() {
             )}
           </div>
           <div className="glass-card !rounded-xl overflow-auto max-h-[600px] flex justify-center p-4">
-            <canvas ref={previewRef} className="shadow-lg rounded" />
+            <canvas ref={previewRef} className="shadow-lg rounded" style={{ display: 'block', maxWidth: '100%' }} />
           </div>
         </div>
       )}
