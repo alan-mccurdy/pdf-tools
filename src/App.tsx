@@ -7,6 +7,9 @@ import RotarPdf from './pages/RotarPdf'
 import EliminarPaginas from './pages/EliminarPaginas'
 import UnirPdf from './pages/UnirPdf'
 import WordAPdf from './pages/WordAPdf'
+import EditarPdf from './pages/EditarPdf'
+import ComprimirPdf from './pages/ComprimirPdf'
+import InsertarImagenes from './pages/InsertarImagenes'
 
 function App() {
   return (
@@ -20,6 +23,9 @@ function App() {
           <Route path="/eliminar-paginas" element={<EliminarPaginas />} />
           <Route path="/unir-pdf" element={<UnirPdf />} />
           <Route path="/word-a-pdf" element={<WordAPdf />} />
+          <Route path="/editar-pdf" element={<EditarPdf />} />
+          <Route path="/comprimir-pdf" element={<ComprimirPdf />} />
+          <Route path="/insertar-imagenes" element={<InsertarImagenes />} />
         </Routes>
       </main>
       <Footer />
