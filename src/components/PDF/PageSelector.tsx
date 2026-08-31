@@ -22,10 +22,10 @@ export default function PageSelector({ pages, selected, onSelect, mode = 'multip
         <button
           key={p.index}
           onClick={() => toggle(p.index)}
-          className={`w-12 h-12 rounded-lg border text-sm font-medium transition
+          className={`w-12 h-12 rounded-xl border text-sm font-medium transition-all duration-200
             ${selected.includes(p.index)
-              ? 'bg-blue-600 border-blue-500 text-white'
-              : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500'}`}
+              ? 'bg-blue-500/20 border-blue-400/50 text-blue-300 shadow-[0_0_10px_rgba(96,165,250,0.15)]'
+              : 'glass-card !rounded-xl text-gray-400 hover:text-white hover:border-white/20'}`}
         >
           {p.index + 1}
         </button>

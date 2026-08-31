@@ -47,8 +47,8 @@ export default function RotarPdf() {
               <button
                 key={deg}
                 onClick={() => setRotation(deg)}
-                className={`px-4 py-2 rounded-lg border transition
-                  ${rotation === deg ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+                className={`px-4 py-2 rounded-xl border transition-all duration-200
+                  ${rotation === deg ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
               >
                 {deg}°
               </button>
@@ -59,15 +59,15 @@ export default function RotarPdf() {
             <label className="text-sm text-gray-400">Aplicar a:</label>
             <button
               onClick={() => setApplyTo('all')}
-              className={`px-4 py-2 rounded-lg border transition
-                ${applyTo === 'all' ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+              className={`px-4 py-2 rounded-xl border transition-all duration-200
+                ${applyTo === 'all' ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
             >
               Todas
             </button>
             <button
               onClick={() => setApplyTo('selected')}
-              className={`px-4 py-2 rounded-lg border transition
-                ${applyTo === 'selected' ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+              className={`px-4 py-2 rounded-xl border transition-all duration-200
+                ${applyTo === 'selected' ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
             >
               Seleccionar
             </button>
@@ -81,8 +81,8 @@ export default function RotarPdf() {
                   onClick={() => setSelected(s =>
                     s.includes(p.index) ? s.filter(i => i !== p.index) : [...s, p.index]
                   )}
-                  className={`w-12 h-12 rounded-lg border text-sm transition
-                    ${selected.includes(p.index) ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+                  className={`w-12 h-12 rounded-xl border text-sm transition-all duration-200
+                    ${selected.includes(p.index) ? 'bg-blue-500/20 border-blue-400/50 text-blue-300' : 'glass-card !rounded-xl text-gray-400 hover:text-white'}`}
                 >
                   {p.index + 1}
                 </button>

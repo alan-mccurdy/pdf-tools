@@ -30,8 +30,10 @@ export default function PDFUploader({ multiple = false, accept = '.pdf', onFiles
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
-      className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition
-        ${dragOver ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-500'}`}
+      className={`glass-card border-2 border-dashed p-12 text-center cursor-pointer transition-all duration-300
+        ${dragOver
+          ? 'border-blue-400 bg-blue-500/10 shadow-[0_0_30px_rgba(96,165,250,0.1)]'
+          : 'border-white/10 hover:border-white/20 hover:bg-white/[0.02]'}`}
     >
       <input
         ref={inputRef}
@@ -41,9 +43,13 @@ export default function PDFUploader({ multiple = false, accept = '.pdf', onFiles
         onChange={handleChange}
         className="hidden"
       />
-      <div className="text-4xl mb-3">📄</div>
-      <p className="text-lg font-medium">Arrastra tu PDF aqui</p>
-      <p className="text-sm text-gray-400 mt-1">o haz click para seleccionar</p>
+      <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-blue-500/10 flex items-center justify-center">
+        <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+      </div>
+      <p className="text-lg font-medium text-white">Arrastra tu archivo aqui</p>
+      <p className="text-sm text-gray-500 mt-1">o haz click para seleccionar</p>
     </div>
   )
 }

@@ -22,10 +22,12 @@ export default function PDFToolLayout({ title, description, keyword, children }:
       <AdSlot position="top" className="mb-6" />
 
       <div className="flex flex-col lg:flex-row gap-6">
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold mb-2">{keyword}</h1>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-3xl font-bold mb-2 text-white">{keyword}</h1>
           <p className="text-gray-400 mb-6">{description}</p>
-          {children}
+          <div className="glass-card p-6">
+            {children}
+          </div>
         </div>
         <aside className="w-full lg:w-80 shrink-0">
           <AdSlot position="sidebar" />

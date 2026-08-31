@@ -125,7 +125,7 @@ export default function InsertarImagenes() {
               <button
                 onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                 disabled={currentPage === 0}
-                className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40"
+                className="glass-card !rounded-xl px-3 py-1 text-sm text-gray-400 hover:text-white disabled:opacity-40"
               >
                 Anterior
               </button>
@@ -135,7 +135,7 @@ export default function InsertarImagenes() {
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={currentPage >= totalPages - 1}
-                className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40"
+                className="glass-card !rounded-xl px-3 py-1 text-sm text-gray-400 hover:text-white disabled:opacity-40"
               >
                 Siguiente
               </button>

@@ -69,8 +69,8 @@ export default function ComprimirPdf() {
 
       {file && (
         <div className="mt-4 space-y-4">
-          <div className="bg-gray-800 rounded-lg px-4 py-3 text-sm">
-            Tamano original: <strong>{(originalSize / 1024).toFixed(0)} KB</strong>
+          <div className="glass-card !rounded-xl px-4 py-3 text-sm text-gray-300">
+            Tamano original: <strong className="text-white">{(originalSize / 1024).toFixed(0)} KB</strong>
           </div>
 
           <div>
