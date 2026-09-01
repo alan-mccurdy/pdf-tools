@@ -172,6 +172,10 @@ export default function EditarPdf() {
   const [drawColor, setDrawColor] = useState('#000000')
   const [drawSize, setDrawSize] = useState(2)
   const [showSaved, setShowSaved] = useState(false)
+  const [showSignature, setShowSignature] = useState(false)
+  const sigCanvasRef = useRef<HTMLCanvasElement>(null)
+  const sigDrawing = useRef(false)
+  const sigPoints = useRef<{ x: number; y: number }[]>([])
 
   // Undo/Redo
   const [history, setHistory] = useState<EditorState[]>([])
@@ -187,6 +191,37 @@ export default function EditarPdf() {
   const imgDragRef = useRef<{ id: number; startX: number; startY: number; imgX: number; imgY: number } | null>(null)
   const fileRef = useRef(file)
   fileRef.current = file
+  const newBoxRef = useRef<number | null>(null)
+  const boxRefsMap = useRef<Map<number, HTMLDivElement>>(new Map())
+
+  // Auto-focus newly created text box
+  useEffect(() => {
+    if (newBoxRef.current !== null) {
+      const id = newBoxRef.current
+      newBoxRef.current = null
+      // Wait for React to render the contentEditable
+      requestAnimationFrame(() => {
+        const el = boxRefsMap.current.get(id)
+        if (el) {
+          const editable = el.querySelector('[contentEditable]') as HTMLElement
+          if (editable) {
+            editable.focus()
+            // Place cursor at end
+            const range = document.createRange()
+            const sel = window.getSelection()
+            if (editable.childNodes.length > 0) {
+              range.setStartAfter(editable.childNodes[editable.childNodes.length - 1])
+            } else {
+              range.setStart(editable, 0)
+            }
+            range.collapse(true)
+            sel?.removeAllRanges()
+            sel?.addRange(range)
+          }
+        }
+      })
+    }
+  }, [boxes.length])
 
   // Save state on change (debounced)
   useEffect(() => {
@@ -429,6 +464,7 @@ export default function EditarPdf() {
     }])
     setSelectedBox(id)
     setSelectedImage(null)
+    newBoxRef.current = id
   }, [mode, currentPage, fontSize, fontFamily, fontColor, highlightColor, bold, italic, underline, align, pushHistory])
 
   const updateBoxText = useCallback((id: number, text: string) => {
@@ -496,6 +532,81 @@ export default function EditarPdf() {
     setImages(prev => prev.filter(i => i.id !== id))
     setSelectedImage(null)
   }, [pushHistory])
+
+  // ── Signature handlers ──────────────────────────────────
+
+  const openSignature = useCallback(() => {
+    setShowSignature(true)
+    sigPoints.current = []
+    // Clear signature canvas on next render
+    requestAnimationFrame(() => {
+      const canvas = sigCanvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        // Draw signature line
+        ctx.strokeStyle = '#ccc'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(20, canvas.height - 30)
+        ctx.lineTo(canvas.width - 20, canvas.height - 30)
+        ctx.stroke()
+      }
+    })
+  }, [])
+
+  const sigMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    sigDrawing.current = true
+    const rect = e.currentTarget.getBoundingClientRect()
+    sigPoints.current = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]
+  }, [])
+
+  const sigMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!sigDrawing.current) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    sigPoints.current.push({ x, y })
+    const canvas = sigCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')!
+    const pts = sigPoints.current
+    if (pts.length < 2) return
+    ctx.strokeStyle = '#1a1a2e'
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y)
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y)
+    ctx.stroke()
+  }, [])
+
+  const sigMouseUp = useCallback(() => {
+    sigDrawing.current = false
+  }, [])
+
+  const placeSignature = useCallback(() => {
+    const canvas = sigCanvasRef.current
+    if (!canvas) return
+    // Get signature as image (white background removed mentally — just crop)
+    const dataUrl = canvas.toDataURL('image/png')
+    const img = new Image()
+    img.onload = () => {
+      const id = nextId.current++
+      const maxW = 200
+      const w = Math.min(img.width, maxW)
+      const h = (img.height / img.width) * w
+      const canvasEl = canvasRef.current!
+      const x = (canvasEl.width - w) / 2
+      const y = canvasEl.height - h - 60 // Place near bottom
+      pushHistory()
+      setImages(prev => [...prev, { id, x, y, width: w, height: h, src: dataUrl, page: currentPage }])
+      setShowSignature(false)
+    }
+    img.src = dataUrl
+  }, [currentPage, pushHistory])
 
   // ── Drawing handlers ───────────────────────────────────
 
@@ -754,6 +865,15 @@ export default function EditarPdf() {
           </svg>
         </button>
         <input id="img-upload" type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+        <button
+          className="spatial-btn-icon"
+          onClick={openSignature}
+          title="Firma digital"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
       </div>
 
       <div className="spatial-toolbar-separator" />
@@ -935,6 +1055,7 @@ export default function EditarPdf() {
   )
 
   return (
+    <>
     <PDFToolLayout
       title="Editar PDF Online Gratis"
       description="Escribe y edita texto directamente sobre las paginas de tu PDF. Gratis y sin subir archivos a servidores."
@@ -978,23 +1099,25 @@ export default function EditarPdf() {
               {currentBoxes.map(box => (
                 <div
                   key={box.id}
-                  className={`editor-box absolute group ${selectedBox === box.id ? 'ring-2 ring-sky-400' : ''}`}
+                  ref={el => { if (el) boxRefsMap.current.set(box.id, el); else boxRefsMap.current.delete(box.id) }}
+                  className={`editor-box absolute group ${selectedBox === box.id ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-transparent' : ''}`}
                   style={{ left: box.x, top: box.y }}
                   onClick={e => { e.stopPropagation(); setSelectedBox(box.id); setSelectedImage(null) }}
                 >
                   {/* Drag handle */}
                   <div
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-0 group-hover:opacity-100 transition-opacity cursor-move"
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
                     onMouseDown={e => handleBoxDragStart(e, box.id)}
                   >
-                    <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
                     </svg>
+                    <span>texto</span>
                   </div>
                   {/* Delete button */}
                   <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
+                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
                     style={{ background: 'var(--danger)' }}
                     onClick={e => { e.stopPropagation(); deleteBox(box.id) }}
                   >
@@ -1025,21 +1148,25 @@ export default function EditarPdf() {
                   <div
                     contentEditable
                     suppressContentEditableWarning
-                    className="min-w-[60px] min-h-[20px] px-1.5 py-1 outline-none whitespace-pre-wrap"
+                    className="min-w-[60px] min-h-[24px] px-2 py-1.5 outline-none whitespace-pre-wrap"
                     style={{
                       fontSize: box.fontSize,
                       fontFamily: box.fontFamily,
                       color: box.fontColor,
-                      backgroundColor: box.highlightColor || 'rgba(255,255,255,0.75)',
+                      backgroundColor: box.highlightColor || 'rgba(255,255,255,0.85)',
                       fontWeight: box.bold ? 'bold' : 'normal',
                       fontStyle: box.italic ? 'italic' : 'normal',
                       textDecoration: box.underline ? 'underline' : 'none',
                       textAlign: box.align,
                       width: box.width,
-                      border: selectedBox === box.id ? '1.5px solid var(--accent)' : '1px dashed rgba(255,255,255,0.3)',
-                      borderRadius: '4px',
-                      lineHeight: 1.3,
-                      backdropFilter: 'blur(4px)',
+                      border: selectedBox === box.id
+                        ? '1.5px solid var(--accent)'
+                        : '1.5px dashed rgba(125,211,252,0.5)',
+                      borderRadius: '6px',
+                      lineHeight: 1.4,
+                      backdropFilter: 'blur(8px)',
+                      boxShadow: selectedBox === box.id ? '0 0 12px rgba(125,211,252,0.2)' : 'none',
+                      transition: 'box-shadow 0.15s ease',
                     }}
                     onInput={e => updateBoxText(box.id, (e.target as HTMLDivElement).textContent || '')}
                     onFocus={() => setSelectedBox(box.id)}
@@ -1185,5 +1312,59 @@ export default function EditarPdf() {
         </div>
       )}
     </PDFToolLayout>
+
+    {/* Signature Modal */}
+    {showSignature && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
+        <div className="spatial-card p-6 rounded-2xl max-w-md w-full mx-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-default)' }}>
+          <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Dibuja tu firma</h3>
+          <div className="rounded-lg overflow-hidden mb-4" style={{ border: '1px solid var(--border-subtle)' }}>
+            <canvas
+              ref={sigCanvasRef}
+              width={400}
+              height={150}
+              className="cursor-crosshair w-full"
+              style={{ background: '#fff', touchAction: 'none' }}
+              onMouseDown={sigMouseDown}
+              onMouseMove={sigMouseMove}
+              onMouseUp={sigMouseUp}
+              onMouseLeave={sigMouseUp}
+            />
+          </div>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
+            Dibuja tu firma en el area blanca. Luego presiona "Colocar firma" para insertarla en el PDF.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button
+              className="spatial-btn text-sm"
+              onClick={() => {
+                sigPoints.current = []
+                const canvas = sigCanvasRef.current
+                if (canvas) {
+                  const ctx = canvas.getContext('2d')!
+                  ctx.fillStyle = '#ffffff'
+                  ctx.fillRect(0, 0, canvas.width, canvas.height)
+                  ctx.strokeStyle = '#ccc'
+                  ctx.lineWidth = 1
+                  ctx.beginPath()
+                  ctx.moveTo(20, canvas.height - 30)
+                  ctx.lineTo(canvas.width - 20, canvas.height - 30)
+                  ctx.stroke()
+                }
+              }}
+            >
+              Limpiar
+            </button>
+            <button className="spatial-btn text-sm" onClick={() => setShowSignature(false)}>
+              Cancelar
+            </button>
+            <button className="spatial-btn-primary text-sm" onClick={placeSignature}>
+              Colocar firma
+            </button>
+          </div>
+        </div>
+      </div>
+      )}
+    </>
   )
 }
