@@ -1,0 +1,21 @@
+{
+  "name": "PDF Tools - Editor PDF Online",
+  "short_name": "PDF Tools",
+  "description": "Edita, filma, combina y comparte PDFs gratis sin subirlos a servidores.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08080d",
+  "theme_color": "#08080d",
+  "icons": [
+    {
+      "src": "/favicon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

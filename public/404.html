@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Tools - Page Not Found</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+        background: linear-gradient(135deg, #08080d 0%, #0e0e16 40%, #0a0f1a 100%);
+        min-height: 100vh;
+        color: var(--text-primary, #f1f5f9);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .container {
+        text-align: center;
+        padding: 2rem;
+      }
+      .icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 1.5rem;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      h1 {
+        font-size: 2.5rem;
+        margin: 0 0 1rem;
+        color: #7dd3fc;
+      }
+      p {
+        font-size: 1.1rem;
+        margin: 0 0 1.5rem;
+        color: #94a3b8;
+      }
+      a {
+        color: #7dd3fc;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <svg class="icon" viewBox="0 0 32 32" fill="none">
+        <rect x="2" y="4" width="20" height="26" rx="3" fill="url(#grad)" opacity="0.9"/>
+        <rect x="10" y="2" width="20" height="26" rx="3" stroke="rgba(125,211,252,0.4)" stroke-width="1.5" fill="rgba(125,211,252,0.08)"/>
+        <path d="M14 10h12M14 15h10M14 20h8" stroke="rgba(125,211,252,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+        <defs>
+          <linearGradient id="grad" x1="2" y1="4" x2="22" y2="30">
+            <stop stopColor="rgba(125,211,252,0.2)"/>
+            <stop offset="1" stopColor="rgba(196,181,253,0.15)"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <h1>Página no encontrada</h1>
+      <p>La página que buscas no existe o ha sido movida.</p>
+      <p>
+        <a href="/">Volver a la página principal</a>
+      </p>
+    </div>
+    <script>
+      // Handle client-side routing
+      window.history.replaceState(null, '', '/');
+    </script>
+  </body>
+</html>

@@ -556,17 +556,21 @@ export default function EditarPdf() {
     })
   }, [])
 
-  const sigMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const sigMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     sigDrawing.current = true
     const rect = e.currentTarget.getBoundingClientRect()
-    sigPoints.current = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+    sigPoints.current = [{ x: clientX - rect.left, y: clientY - rect.top }]
   }, [])
 
-  const sigMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const sigMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!sigDrawing.current) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+    const x = clientX - rect.left
+    const y = clientY - rect.top
     sigPoints.current.push({ x, y })
     const canvas = sigCanvasRef.current
     if (!canvas) return
