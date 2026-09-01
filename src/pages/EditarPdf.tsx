@@ -1331,6 +1331,9 @@ export default function EditarPdf() {
               onMouseMove={sigMouseMove}
               onMouseUp={sigMouseUp}
               onMouseLeave={sigMouseUp}
+              onTouchStart={sigMouseDown}
+              onTouchMove={sigMouseMove}
+              onTouchEnd={sigMouseUp}
             />
           </div>
           <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
