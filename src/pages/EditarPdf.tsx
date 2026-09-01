@@ -984,7 +984,7 @@ export default function EditarPdf() {
 
       {/* Colors */}
       <div className="flex items-center gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Color:</label>
+        <label className="text-xs" style={{ color: '#e2e8f0' }}>Color:</label>
         <input
           type="color"
           value={fontColor}
@@ -993,7 +993,7 @@ export default function EditarPdf() {
         />
       </div>
       <div className="flex items-center gap-1">
-        <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Fondo:</label>
+        <label className="text-xs" style={{ color: '#e2e8f0' }}>Fondo:</label>
         <select
           className="spatial-select text-xs py-1 px-1.5"
           value={highlightColor}
@@ -1028,7 +1028,7 @@ export default function EditarPdf() {
           onChange={e => setScale(Number(e.target.value))}
           className="w-20 accent-sky-300"
         />
-        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{(scale * 100).toFixed(0)}%</span>
+        <span className="text-xs" style={{ color: '#cbd5e1' }}>{(scale * 100).toFixed(0)}%</span>
       </div>
 
       {/* Drawing options (when in draw mode) */}
@@ -1036,7 +1036,7 @@ export default function EditarPdf() {
         <>
           <div className="spatial-toolbar-separator" />
           <div className="flex items-center gap-1">
-            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trazo:</label>
+            <label className="text-xs" style={{ color: '#cbd5e1' }}>Trazo:</label>
             <input type="color" value={drawColor} onChange={e => setDrawColor(e.target.value)} className="w-6 h-6 rounded cursor-pointer border-0" />
             <input type="range" min={1} max={10} value={drawSize} onChange={e => setDrawSize(Number(e.target.value))} className="w-16 accent-sky-300" />
           </div>
@@ -1152,20 +1152,20 @@ export default function EditarPdf() {
                     style={{
                       fontSize: box.fontSize,
                       fontFamily: box.fontFamily,
-                      color: box.fontColor,
-                      backgroundColor: box.highlightColor || 'rgba(255,255,255,0.85)',
+                      color: box.fontColor || '#1e293b',
+                      backgroundColor: box.highlightColor || 'rgba(244,247,255,0.4)',
                       fontWeight: box.bold ? 'bold' : 'normal',
                       fontStyle: box.italic ? 'italic' : 'normal',
                       textDecoration: box.underline ? 'underline' : 'none',
                       textAlign: box.align,
                       width: box.width,
                       border: selectedBox === box.id
-                        ? '1.5px solid var(--accent)'
-                        : '1.5px dashed rgba(125,211,252,0.5)',
+                        ? '1.5px solid #7dd3fc'
+                        : '1.5px dashed rgba(125,211,252,0.6)',
                       borderRadius: '6px',
                       lineHeight: 1.4,
-                      backdropFilter: 'blur(8px)',
-                      boxShadow: selectedBox === box.id ? '0 0 12px rgba(125,211,252,0.2)' : 'none',
+                      backdropFilter: 'blur(6px)',
+                      boxShadow: selectedBox === box.id ? '0 0 8px rgba(125,211,252,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
                     onInput={e => updateBoxText(box.id, (e.target as HTMLDivElement).textContent || '')}
@@ -1212,17 +1212,19 @@ export default function EditarPdf() {
                     style={{
                       fontSize: item.fontSize * scale * 0.75,
                       fontFamily: item.fontFamily,
-                      color: item.edited ? '#059669' : 'var(--text-primary)',
-                      backgroundColor: item.edited ? 'rgba(5,150,105,0.08)' : 'rgba(255,255,255,0.03)',
+                      color: item.edited ? '#059669' : '#f1f5f9',
+                      backgroundColor: item.edited ? 'rgba(5,150,105,0.12)' : 'rgba(255,255,255,0.15)',
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
                       border: selectedExisting === item.id
                         ? '1.5px solid #10b981'
-                        : '1px dashed rgba(16,185,129,0.3)',
+                        : '1px dashed rgba(16,185,129,0.4)',
                       borderRadius: '3px',
                       lineHeight: 1.3,
-                      backdropFilter: 'blur(2px)',
+                      backdropFilter: 'blur(4px)',
+                      boxShadow: selectedExisting === item.id ? '0 0 8px rgba(16,185,129,0.2)' : 'none',
+                      transition: 'box-shadow 0.15s ease',
                     }}
                     onInput={e => updateExistingText(item.id, (e.target as HTMLDivElement).textContent || '')}
                     onFocus={() => setSelectedExisting(item.id)}
