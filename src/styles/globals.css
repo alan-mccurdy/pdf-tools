@@ -359,7 +359,70 @@ body {
   animation: spin 1s linear infinite;
 }
 
-/* ── Utility ─────────────────────────────────────────────── */
+/* └─ Utility ────────────────────────────────────────────── */
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Fallback Glass Classes for SVG/Time Travel ───────────────── */
+
+.glass-card {
+  background: var(--surface-2);
+  backdrop-filter: blur(var(--blur-medium)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-medium)) saturate(180%);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.glass-fallback {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.glass-fallback-success {
+  background: linear-gradient(135deg, var(--success-soft), rgba(16, 185, 129, 0.15));
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: var(--radius-md);
+  color: var(--success);
+  font-weight: 600;
+  padding: 10px 20px;
+  box-shadow: 0 4px 20px rgba(52, 211, 153, 0.12);
+  transition: all var(--duration-fast) ease;
+  cursor: pointer;
+}
+.glass-fallback-success:hover {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.25), rgba(16, 185, 129, 0.25));
+  transform: translateY(-1px);
+}
+
+.glass-fallback-destructive {
+  color: var(--danger);
+  cursor: pointer;
+  transition: color var(--duration-fast) ease;
+}
+.glass-fallback-destructive:hover {
+  color: var(--danger);
+}
+
+.glass-fallback-interactive {
+  background: var(--surface-3);
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  transition: all var(--duration-fast) ease;
+  cursor: pointer;
+}
+.glass-fallback-interactive:hover:not(:disabled) {
+  background: var(--surface-4);
+  border-color: var(--border-strong);
+}
+.glass-fallback-interactive:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

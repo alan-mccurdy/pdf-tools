@@ -319,9 +319,9 @@ export default function WordAPdf() {
       <PDFUploader accept=".docx" onFiles={f => f[0] && setFile(f[0])} />
 
       {file && (
-        <div className="mt-4 glass-card !rounded-xl px-4 py-3 flex items-center justify-between">
-          <span className="text-sm text-gray-300">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
-          <button onClick={() => { setFile(null); setPdfBytes(null); setTotalPreviewPages(0) }} className="text-red-400 hover:text-red-300 text-sm transition-colors">
+        <div className="mt-4 glass-card !rounded-xl px-4 py-3 flex items-center justify-between glass-fallback">
+          <span className="text-sm text-white/90">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+          <button onClick={() => { setFile(null); setPdfBytes(null); setTotalPreviewPages(0) }} className="glass-fallback-destructive hover:text-red-300">
             Quitar
           </button>
         </div>
@@ -337,7 +337,7 @@ export default function WordAPdf() {
         {pdfBytes && (
           <button
             onClick={handleDownload}
-            className="glass-btn-success mt-6 px-6 py-3 text-lg"
+            className="glass-fallback-success glass-fallback-hover mt-6 px-6 py-3 text-lg"
           >
             Descargar PDF
           </button>
@@ -354,17 +354,17 @@ export default function WordAPdf() {
                 <button
                   onClick={() => changePreviewPage(-1)}
                   disabled={previewPage <= 1}
-                  className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 text-sm"
+                  className="px-3 py-1 glass-fallback-interactive rounded disabled:opacity-40 text-sm"
                 >
                   Anterior
                 </button>
-                <span className="text-sm text-gray-400">
+                <span className="text-sm text-white/70">
                   Pagina {previewPage} de {totalPreviewPages}
                 </span>
                 <button
                   onClick={() => changePreviewPage(1)}
                   disabled={previewPage >= totalPreviewPages}
-                  className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 text-sm"
+                  className="px-3 py-1 glass-fallback-interactive rounded disabled:opacity-40 text-sm"
                 >
                   Siguiente
                 </button>
