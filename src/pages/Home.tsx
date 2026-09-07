@@ -90,7 +90,7 @@ export default function Home() {
             className="spatial-card p-6 group fade-in"
             style={{ animationDelay: `${i * 50}ms` }}
           >
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 transition-all duration-300"
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 transition-all duration-300"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
               <ToolIcon icon={tool.icon} />
             </div>

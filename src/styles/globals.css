@@ -29,9 +29,9 @@
   --accent-gradient: linear-gradient(135deg, #7dd3fc, #c4b5fd);
 
   /* Text — vibrancy system */
-  --text-primary: rgba(255, 255, 255, 0.92);
-  --text-secondary: rgba(255, 255, 255, 0.55);
-  --text-tertiary: rgba(255, 255, 255, 0.35);
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.70);
+  --text-tertiary: rgba(255, 255, 255, 0.55);
   --text-accent: #7dd3fc;
 
   /* Semantic */
