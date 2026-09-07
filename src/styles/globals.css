@@ -29,9 +29,9 @@
   --accent-gradient: linear-gradient(135deg, #7dd3fc, #c4b5fd);
 
   /* Text — vibrancy system */
-  --text-primary: rgba(255, 255, 255, 0.95);
-  --text-secondary: rgba(255, 255, 255, 0.70);
-  --text-tertiary: rgba(255, 255, 255, 0.55);
+  --text-primary: rgba(255, 255, 255, 0.98);
+  --text-secondary: rgba(255, 255, 255, 0.75);
+  --text-tertiary: rgba(255, 255, 255, 0.65);
   --text-accent: #7dd3fc;
 
   /* Semantic */
@@ -109,6 +109,9 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   transition: all var(--duration-normal) var(--ease-spatial);
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
 }
 .spatial-card:hover {
   border-color: var(--border-hover);
