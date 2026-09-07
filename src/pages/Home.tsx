@@ -91,12 +91,12 @@ export default function Home() {
             style={{ animationDelay: `${i * 50}ms` }}
           >
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 transition-all duration-300 flex-shrink-0"
-              style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+              style={{ background: 'var(--accent-medium)', color: 'var(--accent)' }}>
               <ToolIcon icon={tool.icon} />
             </div>
             <div className="flex-1 flex flex-col justify-between min-h-0">
               <h2 className="text-lg font-semibold transition-colors truncate" style={{ color: 'var(--text-primary)' }}>{tool.name}</h2>
-              <p className="text-sm mt-1 truncate" style={{ color: 'var(--text-tertiary)' }}>{tool.desc}</p>
+              <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>{tool.desc}</p>
             </div>
           </Link>
         ))}
