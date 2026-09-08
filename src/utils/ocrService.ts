@@ -11,11 +11,10 @@ export async function initOCR(): Promise<Worker | null> {
   if (ocrWorker) return ocrWorker
   
   try {
-    const worker = await createWorker()
+    const worker = await createWorker('eng+spa')
     
     await worker.load()
-    await worker.loadLanguage('eng', 'spa')
-    await worker.initialize('eng+spa')
+    await worker.reinitialize('eng+spa')
     
     ocrWorker = worker
     return ocrWorker
@@ -34,7 +33,7 @@ export async function extractTextFromImage(imageData: string): Promise<string> {
   if (!ocrWorker) return ''
   
   try {
-    const result = await ocrWorker.recognize(imageData, 'eng+spa')
+    const result = await ocrWorker.recognize(imageData)
     return result.data.text
   } catch (error) {
     console.error('OCR extraction failed:', error)

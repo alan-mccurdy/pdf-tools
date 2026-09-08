@@ -2,7 +2,7 @@
   "name": "PDF Tools - Editor PDF Online",
   "short_name": "PDF Tools",
   "description": "Edita, filma, combina y comparte PDFs gratis sin subirlos a servidores.",
-  "start_url": "/",
+  "start_url": "/pdf-tools/",
   "display": "standalone",
   "background_color": "#08080d",
   "theme_color": "#08080d",

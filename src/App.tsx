@@ -1,5 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
-import React, { lazy, Suspense } from 'react'
+import { lazy, Suspense } from 'react'
 import Header from './components/Layout/Header'
 import Footer from './components/Layout/Footer'
 

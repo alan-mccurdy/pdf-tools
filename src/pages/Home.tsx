@@ -71,6 +71,23 @@ export default function Home() {
       <Helmet>
         <title>Editor PDF Online Gratis — PDF Tools</title>
         <meta name="description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y mas. 100% en tu navegador, sin subir archivos." />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            "name": "PDF Tools",
+            "url": "https://alan-mccurdy.github.io/pdf-tools/",
+            "description": "Editor PDF online gratis: edita, une, separa, rota, comprime y convierte PDFs sin subir archivos.",
+            "applicationCategory": "UtilitiesApplication",
+            "operatingSystem": "Any",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "featureList": [
+              "Editar PDF", "Unir PDFs", "Word a PDF", "PDF a Word",
+              "Separar PDF", "Rotar PDF", "Comprimir PDF",
+              "Eliminar paginas", "Insertar imagenes", "OCR PDF"
+            ]
+          })}
+        </script>
       </Helmet>
 
       <div className="text-center mb-12 fade-in">

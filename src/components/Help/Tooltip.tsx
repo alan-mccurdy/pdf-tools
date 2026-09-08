@@ -3,7 +3,7 @@
  * Provides contextual help tooltips for PDF editor features
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 interface TooltipProps {
   text: string
