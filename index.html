@@ -26,9 +26,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="PDF Tools" />
     <link rel="apple-touch-icon" href="/favicon-192x192.png" />
-    <script type="module" crossorigin src="/pdf-tools/assets/index-BNxcE6bV.js"></script>
+    <script type="module" crossorigin src="/pdf-tools/assets/index-DlN5-21Y.js"></script>
     <link rel="modulepreload" crossorigin href="/pdf-tools/assets/rolldown-runtime-C0FnF6B9.js">
-    <link rel="stylesheet" crossorigin href="/pdf-tools/assets/index-p_05UnV5.css">
+    <link rel="stylesheet" crossorigin href="/pdf-tools/assets/index-B44AG2oX.css">
   </head>
   <body>
     <div id="root"></div>
@@ -38,7 +38,8 @@
         var redirect = sessionStorage.getItem('spa-redirect');
         if (redirect) {
           sessionStorage.removeItem('spa-redirect');
-          window.history.replaceState(null, '', redirect);
+          var repo = '/pdf-tools';
+          window.history.replaceState(null, '', repo + redirect);
         }
       })();
     </script>
