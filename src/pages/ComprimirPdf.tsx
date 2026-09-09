@@ -116,16 +116,56 @@ export default function ComprimirPdf() {
             <DownloadButton onClick={handleCompress} loading={loading} label="Comprimir PDF" />
           ) : (
             <div className="space-y-3">
-              <div className="spatial-card-static px-4 py-3 text-sm" style={{ color: 'var(--text-primary)' }}>
-                <div>Original: <strong>{(originalSize / 1024).toFixed(0)} KB</strong></div>
-                <div>Comprimido: <strong>{(resultSize / 1024).toFixed(0)} KB</strong></div>
-                <div className="mt-1">
+              {/* Visual comparison bar */}
+              <div className="spatial-card-static px-4 py-4 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span style={{ color: 'var(--text-secondary)' }}>Original</span>
+                  <span className="font-mono font-medium" style={{ color: 'var(--text-primary)' }}>
+                    {originalSize > 1024 * 1024
+                      ? `${(originalSize / 1024 / 1024).toFixed(1)} MB`
+                      : `${(originalSize / 1024).toFixed(0)} KB`}
+                  </span>
+                </div>
+                <div className="w-full h-3 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: '100%',
+                      background: 'var(--text-tertiary)',
+                      opacity: 0.5
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-sm">
+                  <span style={{ color: 'var(--text-secondary)' }}>Comprimido</span>
+                  <span className="font-mono font-medium" style={{ color: 'var(--accent)' }}>
+                    {resultSize > 1024 * 1024
+                      ? `${(resultSize / 1024 / 1024).toFixed(1)} MB`
+                      : `${(resultSize / 1024).toFixed(0)} KB`}
+                  </span>
+                </div>
+                <div className="w-full h-3 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.max(5, (resultSize / originalSize) * 100)}%`,
+                      background: savings > 0 ? 'var(--success)' : savings < 0 ? 'var(--warning)' : 'var(--accent)'
+                    }}
+                  />
+                </div>
+
+                <div className="text-center pt-1">
                   {savings > 0 ? (
-                    <span className="text-green-400">-{savings}% de reduccion</span>
+                    <span className="text-lg font-bold" style={{ color: 'var(--success)' }}>
+                      -{savings}% mas pequeno
+                    </span>
                   ) : savings < 0 ? (
-                    <span className="text-yellow-400">+{Math.abs(savings)}% (el archivo creció)</span>
+                    <span className="text-lg font-bold" style={{ color: 'var(--warning)' }}>
+                      +{Math.abs(savings)}% mas grande
+                    </span>
                   ) : (
-                    <span className="text-[var(--text-secondary)]">Sin cambio significativo</span>
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      Sin cambio significativo
+                    </span>
                   )}
                 </div>
               </div>

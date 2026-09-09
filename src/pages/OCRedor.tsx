@@ -98,8 +98,8 @@ export default function OCRedor() {
 
       {file && (
         <div className="mt-6 space-y-4">
-          <div className="glass-card p-4 rounded-xl">
-            <p className="text-sm text-white/90">
+          <div className="spatial-card-static px-4 py-3">
+            <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
               <strong>Archivo:</strong> {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           </div>
@@ -119,22 +119,22 @@ export default function OCRedor() {
 
           {pages.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">
+              <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
                 Resultados del OCR
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {pages.map((page, idx) => (
-                  <div key={idx} className="glass-card p-3 rounded-xl">
-                    <h4 className="text-sm font-medium text-white/80 mb-2">
-                      Página {idx + 1}
+                  <div key={idx} className="spatial-card-static px-4 py-3">
+                    <h4 className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                      Pagina {idx + 1}
                     </h4>
                     <img
                       src={page.url}
                       alt={`Page ${idx + 1}`}
                       className="w-full h-32 object-cover rounded mb-2"
                     />
-                    <p className="text-xs text-white/70 line-clamp-3">
+                    <p className="text-xs line-clamp-3" style={{ color: 'var(--text-tertiary)' }}>
                       {page.text}
                     </p>
                   </div>
@@ -143,11 +143,11 @@ export default function OCRedor() {
 
               {extractedText && (
                 <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">
-                    Texto completo extraído
+                  <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                    Texto completo extraido
                   </h3>
-                  <div className="glass-card p-4 rounded-xl overflow-x-auto">
-                    <pre className="text-sm text-white/90 whitespace-pre-wrap">
+                  <div className="spatial-card-static px-4 py-3 overflow-x-auto">
+                    <pre className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>
                       {extractedText}
                     </pre>
                   </div>
@@ -164,7 +164,7 @@ export default function OCRedor() {
           )}
 
           {loading && (
-            <p className="text-sm text-white/70">
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
               Inicializando OCR... Esto puede tardar unos segundos.
             </p>
           )}

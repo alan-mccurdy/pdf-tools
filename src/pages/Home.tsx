@@ -11,7 +11,7 @@ const tools = [
   { path: '/comprimir-pdf', name: 'Comprimir PDF', desc: 'Reduce el tamano de tu PDF', icon: 'compress' },
   { path: '/eliminar-paginas', name: 'Eliminar Paginas', desc: 'Borra paginas de un PDF', icon: 'delete' },
   { path: '/insertar-imagenes', name: 'Insertar Imagenes', desc: 'Agrega imagenes o firmas', icon: 'image' },
-  { path: '/ocr', name: 'OCR PDF', desc: 'Extrae texto de imagenes y escaneados', icon: 'ocr' },
+  { path: '/ocr-pdf', name: 'OCR PDF', desc: 'Extrae texto de imagenes y escaneados', icon: 'ocr' },
 ]
 
 function ToolIcon({ icon }: { icon: string }) {
