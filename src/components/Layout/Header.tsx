@@ -11,7 +11,7 @@ const navItems = [
   { path: '/comprimir-pdf', label: 'Comprimir' },
   { path: '/eliminar-paginas', label: 'Eliminar' },
   { path: '/insertar-imagenes', label: 'Insertar Img' },
-  { path: '/ocr', label: 'OCR' },
+  { path: '/ocr-pdf', label: 'OCR' },
 ]
 
 export default function Header() {

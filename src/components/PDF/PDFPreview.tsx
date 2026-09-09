@@ -51,17 +51,19 @@ export default function PDFPreview({ file }: PDFPreviewProps) {
           <button
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
             disabled={currentPage <= 1}
-            className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40"
+            className="px-3 py-1 rounded disabled:opacity-40"
+            style={{ background: 'var(--surface-2)', color: 'var(--text-primary)' }}
           >
             Anterior
           </button>
-          <span className="text-sm text-gray-400">
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             Pagina {currentPage} de {totalPages}
           </span>
           <button
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
             disabled={currentPage >= totalPages}
-            className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40"
+            className="px-3 py-1 rounded disabled:opacity-40"
+            style={{ background: 'var(--surface-2)', color: 'var(--text-primary)' }}
           >
             Siguiente
           </button>

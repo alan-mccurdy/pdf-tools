@@ -19,7 +19,6 @@ export default function AdSlot({ position, className = '' }: AdSlotProps) {
     }
   }, [])
 
-  // Placeholder for development — replace pub ID before production
   return (
     <div className={`ad-slot ad-${position} ${className}`} ref={adRef}>
       <ins
@@ -30,6 +29,20 @@ export default function AdSlot({ position, className = '' }: AdSlotProps) {
         data-ad-format="auto"
         data-full-width-responsive="true"
       />
+      {/* Fallback visible while AdSense loads or if blocked */}
+      <div
+        className="flex items-center justify-center rounded-lg"
+        style={{
+          minHeight: position === 'sidebar' ? '250px' : '90px',
+          background: 'var(--surface-1)',
+          border: '1px dashed var(--border-subtle)',
+          color: 'var(--text-tertiary)',
+          fontSize: '11px',
+          letterSpacing: '0.05em',
+        }}
+      >
+        Advertisement
+      </div>
     </div>
   )
 }

@@ -18,7 +18,7 @@ const OCRedor = lazy(() => import('./pages/OCRedor'))
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text-primary)' }}>
       <Header />
       <main className="max-w-7xl mx-auto px-4 py-8">
         <Suspense fallback={<LoadingSpinner />}>
