@@ -445,3 +445,67 @@ body {
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* ── Z-index scale ──────────────────────────────────────── */
+:root {
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-modal-backdrop: 30;
+  --z-modal: 40;
+  --z-tooltip: 50;
+}
+
+/* ── Touch targets (44x44px minimum) ────────────────────── */
+button, a, input[type="checkbox"], input[type="radio"], select {
+  min-height: 44px;
+  min-width: 44px;
+}
+/* Exception: small inline inputs like font size */
+input[type="number"].w-14, input[type="text"].w-14 {
+  min-width: 0;
+  min-height: 32px;
+}
+
+/* ── Responsive toolbar ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .spatial-toolbar {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .spatial-toolbar > * {
+    min-width: 0;
+  }
+}
+
+/* ── Small screens (375px - phones) ─────────────────────── */
+@media (max-width: 375px) {
+  .spatial-card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+  .spatial-toolbar {
+    gap: 4px;
+    padding: 4px 6px;
+  }
+  .spatial-toolbar > button,
+  .spatial-toolbar > select {
+    font-size: 11px;
+    padding: 4px 6px;
+  }
+}
+
+/* ── Large screens (1024px+) ────────────────────────────── */
+@media (min-width: 1024px) {
+  .spatial-toolbar {
+    gap: 10px;
+    padding: 10px 16px;
+  }
+}
+
+/* ── Extra large (1440px+) ──────────────────────────────── */
+@media (min-width: 1440px) {
+  .spatial-toolbar {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+}

@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useState } from 'react'
 
 const navItems = [
   { path: '/editar-pdf', label: 'Editar PDF' },
@@ -10,13 +11,15 @@ const navItems = [
   { path: '/comprimir-pdf', label: 'Comprimir' },
   { path: '/eliminar-paginas', label: 'Eliminar' },
   { path: '/insertar-imagenes', label: 'Insertar Img' },
+  { path: '/ocr', label: 'OCR' },
 ]
 
 export default function Header() {
   const location = useLocation()
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <header className="sticky top-0 z-50 spatial-glass border-b border-white/[0.06]">
+    <header className="sticky top-0 spatial-glass border-b border-white/[0.06]" style={{ zIndex: 'var(--z-sticky)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
@@ -58,40 +61,43 @@ export default function Header() {
           {/* Mobile menu button */}
           <button
             className="lg:hidden spatial-btn-icon"
-            onClick={() => {
-              const nav = document.getElementById('mobile-nav')
-              nav?.classList.toggle('hidden')
-            }}
+            onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Menu"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16"/>
+              {mobileOpen ? (
+                <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12"/>
+              ) : (
+                <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16"/>
+              )}
             </svg>
           </button>
         </div>
 
         {/* Mobile nav */}
-        <nav id="mobile-nav" className="hidden lg:hidden pb-3">
-          <div className="flex flex-wrap gap-1.5">
-            {navItems.map(item => {
-              const active = location.pathname === item.path
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => document.getElementById('mobile-nav')?.classList.add('hidden')}
-                  className={`px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${
-                    active
-                      ? 'bg-white/[0.08] text-[var(--accent)] border border-[var(--accent-strong)]'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/[0.04]'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              )
-            })}
-          </div>
-        </nav>
+        {mobileOpen && (
+          <nav className="lg:hidden pb-3">
+            <div className="flex flex-wrap gap-1.5">
+              {navItems.map(item => {
+                const active = location.pathname === item.path
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileOpen(false)}
+                    className={`px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${
+                      active
+                        ? 'bg-white/[0.08] text-[var(--accent)] border border-[var(--accent-strong)]'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </nav>
+        )}
       </div>
     </header>
   )

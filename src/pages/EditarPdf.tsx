@@ -169,7 +169,7 @@ export default function EditarPdf() {
   const [underline, setUnderline] = useState(false)
   const [align, setAlign] = useState<'left' | 'center' | 'right'>('left')
   const [mode, setMode] = useState<'text' | 'draw' | 'image'>('text')
-  const [drawColor, setDrawColor] = useState('#000000')
+  const [drawColor, setDrawColor] = useState('#7dd3fc')
   const [drawSize, setDrawSize] = useState(2)
   const [showSaved, setShowSaved] = useState(false)
   const [showSignature, setShowSignature] = useState(false)
@@ -286,6 +286,10 @@ export default function EditarPdf() {
       const items = textContent.items as any[]
       if (!items.length) { setExistingTexts(prev => prev.filter(t => t.page !== currentPage)); return }
 
+      // Get viewport height for Y-coordinate inversion (PDF y=0 is bottom, CSS top=0 is top)
+      const viewport = page.getViewport({ scale })
+      const viewportHeight = viewport.height
+
       // Group by Y-coordinate (within 3px tolerance at scale) to form lines
       const Y_TOLERANCE = 3
       const lines: { items: any[]; y: number }[] = []
@@ -317,12 +321,14 @@ export default function EditarPdf() {
         const combinedText = line.items.map((i: any) => i.str).join(' ')
         const firstItem = line.items[0]
         const tx = firstItem.transform
-        const fontSize = Math.abs(tx[3]) || 12
+        const fontSize = Math.abs(tx[3]) || 12  // raw PDF font size (no scale)
         const x = tx[4] * scale
-        const y = tx[5] * scale
+        // Invert Y: PDF y=0 is bottom, CSS top=0 is top
+        const y = viewportHeight - tx[5] * scale - fontSize * scale
         // Calculate width from last item
         const lastItem = line.items[line.items.length - 1]
-        const endX = (lastItem.transform[4] + (lastItem.width || 0)) * scale
+        const lastItemWidth = lastItem.width || lastItem.str.length * fontSize * 0.6
+        const endX = (lastItem.transform[4] + lastItemWidth) * scale
         const width = Math.max(endX - x, 60)
         const height = fontSize * scale * 1.3
 
@@ -988,7 +994,7 @@ export default function EditarPdf() {
 
       {/* Colors */}
       <div className="flex items-center gap-1">
-        <label className="text-xs" style={{ color: '#e2e8f0' }}>Color:</label>
+        <label className="text-xs" style={{ color: 'var(--text-primary)' }}>Color:</label>
         <input
           type="color"
           value={fontColor}
@@ -997,7 +1003,7 @@ export default function EditarPdf() {
         />
       </div>
       <div className="flex items-center gap-1">
-        <label className="text-xs" style={{ color: '#e2e8f0' }}>Fondo:</label>
+        <label className="text-xs" style={{ color: 'var(--text-primary)' }}>Fondo:</label>
         <select
           className="spatial-select text-xs py-1 px-1.5"
           value={highlightColor}
@@ -1032,7 +1038,7 @@ export default function EditarPdf() {
           onChange={e => setScale(Number(e.target.value))}
           className="w-20 accent-sky-300"
         />
-        <span className="text-xs" style={{ color: '#cbd5e1' }}>{(scale * 100).toFixed(0)}%</span>
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{(scale * 100).toFixed(0)}%</span>
       </div>
 
       {/* Drawing options (when in draw mode) */}
@@ -1040,7 +1046,7 @@ export default function EditarPdf() {
         <>
           <div className="spatial-toolbar-separator" />
           <div className="flex items-center gap-1">
-            <label className="text-xs" style={{ color: '#cbd5e1' }}>Trazo:</label>
+            <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trazo:</label>
             <input type="color" value={drawColor} onChange={e => setDrawColor(e.target.value)} className="w-6 h-6 rounded cursor-pointer border-0" />
             <input type="range" min={1} max={10} value={drawSize} onChange={e => setDrawSize(Number(e.target.value))} className="w-16 accent-sky-300" />
           </div>
@@ -1081,9 +1087,12 @@ export default function EditarPdf() {
             </div>
           )}
 
-          {/* PDF + Overlay */}
+          {/* PDF + Overlay — canvas hidden when text items exist, white background shows extracted text only */}
           <div className="relative inline-block rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-default)' }}>
-            <canvas ref={canvasRef} className="block" />
+            <canvas ref={canvasRef} className="block" style={currentExisting.length > 0 ? { opacity: 0, pointerEvents: 'none' } : undefined} />
+            {currentExisting.length > 0 && (
+              <div className="absolute inset-0" style={{ background: '#ffffff', zIndex: 0 }} />
+            )}
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0"
@@ -1096,7 +1105,7 @@ export default function EditarPdf() {
             <div
               ref={overlayRef}
               className="absolute inset-0"
-              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none' }}
+              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none', zIndex: 1 }}
               onClick={handleOverlayClick}
             >
               {/* Text boxes */}
@@ -1104,14 +1113,14 @@ export default function EditarPdf() {
                 <div
                   key={box.id}
                   ref={el => { if (el) boxRefsMap.current.set(box.id, el); else boxRefsMap.current.delete(box.id) }}
-                  className={`editor-box absolute group ${selectedBox === box.id ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-transparent' : ''}`}
+                  className={`editor-box absolute group cursor-pointer ${selectedBox === box.id ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-transparent' : ''}`}
                   style={{ left: box.x, top: box.y }}
                   onClick={e => { e.stopPropagation(); setSelectedBox(box.id); setSelectedImage(null) }}
                 >
-                  {/* Drag handle */}
+                  {/* Drag handle - always visible */}
                   <div
-                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-0 group-hover:opacity-100 transition-opacity cursor-move"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
+                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none' }}
                     onMouseDown={e => handleBoxDragStart(e, box.id)}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1121,7 +1130,7 @@ export default function EditarPdf() {
                   </div>
                   {/* Delete button */}
                   <button
-                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
+                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
                     style={{ background: 'var(--danger)' }}
                     onClick={e => { e.stopPropagation(); deleteBox(box.id) }}
                   >
@@ -1164,8 +1173,8 @@ export default function EditarPdf() {
                       textAlign: box.align,
                       width: box.width,
                       border: selectedBox === box.id
-                        ? '1.5px solid #7dd3fc'
-                        : '1.5px dashed rgba(125,211,252,0.6)',
+                        ? '2px solid #38bdf8'
+                        : '1.5px dashed #38bdf8',
                       borderRadius: '6px',
                       lineHeight: 1.4,
                       backdropFilter: 'blur(6px)',
@@ -1184,14 +1193,14 @@ export default function EditarPdf() {
               {currentExisting.map(item => (
                 <div
                   key={`ext-${item.id}`}
-                  className={`existing-text absolute group ${selectedExisting === item.id ? 'ring-2 ring-emerald-400' : ''}`}
+                  className={`existing-text absolute group cursor-pointer ${selectedExisting === item.id ? 'ring-2 ring-emerald-400' : ''}`}
                   style={{ left: item.x, top: item.y }}
                   onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
                 >
                   {/* Drag handle */}
                   <div
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
+                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-100 transition-opacity"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
                   >
                     <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -1200,7 +1209,7 @@ export default function EditarPdf() {
                   </div>
                   {/* Delete button */}
                   <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
+                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
                     style={{ background: 'var(--danger)' }}
                     onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
                   >
@@ -1216,18 +1225,18 @@ export default function EditarPdf() {
                     style={{
                       fontSize: item.fontSize * scale * 0.75,
                       fontFamily: item.fontFamily,
-                      color: item.edited ? '#059669' : '#f1f5f9',
-                      backgroundColor: item.edited ? 'rgba(5,150,105,0.12)' : 'rgba(255,255,255,0.15)',
+                      color: item.edited ? '#047857' : '#111827',
+                      backgroundColor: item.edited ? 'rgba(16,185,129,0.15)' : 'transparent',
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
                       border: selectedExisting === item.id
-                        ? '1.5px solid #10b981'
-                        : '1px dashed rgba(16,185,129,0.4)',
+                        ? '2px solid #10b981'
+                        : '1.5px dashed rgba(16,185,129,0.6)',
                       borderRadius: '3px',
                       lineHeight: 1.3,
-                      backdropFilter: 'blur(4px)',
-                      boxShadow: selectedExisting === item.id ? '0 0 8px rgba(16,185,129,0.2)' : 'none',
+                      backdropFilter: item.edited ? 'blur(4px)' : 'none',
+                      boxShadow: selectedExisting === item.id ? '0 0 8px rgba(16,185,129,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
                     onInput={e => updateExistingText(item.id, (e.target as HTMLDivElement).textContent || '')}
@@ -1247,7 +1256,7 @@ export default function EditarPdf() {
               {currentImages.map(img => (
                 <div
                   key={img.id}
-                  className={`editor-image absolute group ${selectedImage === img.id ? 'ring-2 ring-sky-400' : ''}`}
+                  className={`editor-image absolute group cursor-pointer ${selectedImage === img.id ? 'ring-2 ring-sky-400' : ''}`}
                   style={{ left: img.x, top: img.y }}
                   onClick={e => { e.stopPropagation(); setSelectedImage(img.id); setSelectedBox(null) }}
                 >
@@ -1263,7 +1272,7 @@ export default function EditarPdf() {
                   </div>
                   {/* Delete */}
                   <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px]"
+                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
                     style={{ background: 'var(--danger)' }}
                     onClick={e => { e.stopPropagation(); deleteImage(img.id) }}
                   >
@@ -1321,7 +1330,7 @@ export default function EditarPdf() {
 
     {/* Signature Modal */}
     {showSignature && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
+      <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 'var(--z-modal-backdrop)', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
         <div className="spatial-card p-6 rounded-2xl max-w-md w-full mx-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-default)' }}>
           <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Dibuja tu firma</h3>
           <div className="rounded-lg overflow-hidden mb-4" style={{ border: '1px solid var(--border-subtle)' }}>
