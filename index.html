@@ -35,7 +35,8 @@
         var redirect = sessionStorage.getItem('spa-redirect');
         if (redirect) {
           sessionStorage.removeItem('spa-redirect');
-          window.history.replaceState(null, '', redirect);
+          var repo = '/pdf-tools';
+          window.history.replaceState(null, '', repo + redirect);
         }
       })();
     </script>
