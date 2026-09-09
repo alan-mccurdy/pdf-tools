@@ -1197,26 +1197,26 @@ export default function EditarPdf() {
                   style={{ left: item.x, top: item.y }}
                   onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
                 >
-                  {/* Drag handle */}
-                  <div
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-100 transition-opacity"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
-                  >
-                    <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
-                    </svg>
-                    <span className="ml-1 text-[8px]" style={{ color: 'var(--accent)' }}>original</span>
+                  {/* Drag handle + delete — show on hover only */}
+                  <div className="absolute -top-6 left-0 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div
+                      className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
+                      style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                      </svg>
+                    </div>
+                    <button
+                      className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer"
+                      style={{ background: 'var(--danger)' }}
+                      onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
-                  {/* Delete button */}
-                  <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
-                    style={{ background: 'var(--danger)' }}
-                    onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
-                  >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
                   {/* Editable text */}
                   <div
                     contentEditable
@@ -1225,17 +1225,17 @@ export default function EditarPdf() {
                     style={{
                       fontSize: item.fontSize * scale * 0.75,
                       fontFamily: item.fontFamily,
-                      color: item.edited ? '#047857' : '#111827',
-                      backgroundColor: item.edited ? 'rgba(16,185,129,0.15)' : 'transparent',
+                      color: item.edited ? '#047857' : '#0f172a',
+                      backgroundColor: item.edited ? 'rgba(16,185,129,0.1)' : 'transparent',
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
                       border: selectedExisting === item.id
                         ? '2px solid #10b981'
-                        : '1.5px dashed rgba(16,185,129,0.6)',
+                        : '1.5px dashed rgba(16,185,129,0.35)',
                       borderRadius: '3px',
                       lineHeight: 1.3,
-                      backdropFilter: item.edited ? 'blur(4px)' : 'none',
+                      backdropFilter: 'none',
                       boxShadow: selectedExisting === item.id ? '0 0 8px rgba(16,185,129,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
