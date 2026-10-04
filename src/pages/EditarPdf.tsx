@@ -4,6 +4,7 @@ import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
+import { extractWordsFromImage, type OcrWordBox } from '../utils/ocrService'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -62,6 +63,24 @@ interface ExistingTextItem {
   // Fillable field detection
   isFillable?: boolean
   fillableType?: 'underscore' | 'dots' | 'checkbox' | 'brackets' | ''
+  /** 'text' = from the PDF text layer, 'ocr' = recognized from a scanned page */
+  source?: 'text' | 'ocr'
+}
+
+/** Native AcroForm field (widget annotation) shown as a real input over the page. */
+interface FormField {
+  name: string
+  type: 'Tx' | 'Btn' | 'Radio'
+  // Overlay coords (CSS px at the scale the field was extracted)
+  x: number
+  y: number
+  width: number
+  height: number
+  value: string      // Tx: current text
+  checked: boolean   // Btn/Radio: current checked state
+  exportValue?: string // Radio: value exported when this option is selected
+  page: number
+  touched: boolean
 }
 
 interface EditorState {
@@ -69,6 +88,7 @@ interface EditorState {
   images: ImageBox[]
   strokes: DrawStroke[]
   existingTexts?: ExistingTextItem[]
+  formFields?: FormField[]
 }
 
 /* ── IndexedDB persistence ──────────────────────────────── */
@@ -122,7 +142,7 @@ const HIGHLIGHT_COLORS = [
   { name: 'Naranja claro', value: '#fed7aa' },
 ]
 
-function fontToPdfLib(fontFamily: string): StandardFonts {
+function fontToPdfLib(fontFamily: string, bold = false, italic = false): StandardFonts {
   const map: Record<string, StandardFonts> = {
     'Helvetica': StandardFonts.Helvetica,
     'Arial': StandardFonts.Helvetica,
@@ -135,7 +155,115 @@ function fontToPdfLib(fontFamily: string): StandardFonts {
     'Trebuchet MS': StandardFonts.Helvetica,
     'Palatino': StandardFonts.TimesRoman,
   }
-  return map[fontFamily] || StandardFonts.Helvetica
+  const base = map[fontFamily] || StandardFonts.Helvetica
+  // Apply bold/italic variants of the resolved base font
+  if (base === StandardFonts.Helvetica) {
+    if (bold && italic) return StandardFonts.HelveticaBoldOblique
+    if (bold) return StandardFonts.HelveticaBold
+    if (italic) return StandardFonts.HelveticaOblique
+  } else if (base === StandardFonts.TimesRoman) {
+    if (bold && italic) return StandardFonts.TimesRomanBoldItalic
+    if (bold) return StandardFonts.TimesRomanBold
+    if (italic) return StandardFonts.TimesRomanItalic
+  } else if (base === StandardFonts.Courier) {
+    if (bold && italic) return StandardFonts.CourierBoldOblique
+    if (bold) return StandardFonts.CourierBold
+    if (italic) return StandardFonts.CourierOblique
+  }
+  return base
+}
+
+/**
+ * Resolve the real font of a pdf.js text item.
+ * `fontName` from getTextContent is an internal id (e.g. 'g_d0_f1'), so bold/italic
+ * regexes never match it — the actual font object lives in page.commonObjs.
+ */
+function resolveRealFont(page: unknown, loadedName: string): { family: string; bold: boolean; italic: boolean } {
+  try {
+    const objs = (page as { commonObjs?: { get?: (id: string) => { name?: string; fallbackName?: string } } })?.commonObjs
+    const font = objs?.get?.(loadedName)
+    // Embedded subset fonts are prefixed like 'ABCDEF+Arial-Bold'
+    const raw = (font?.name || font?.fallbackName || '').replace(/^\/?([A-Z]{6}\+)?/, '')
+    const n = raw.toLowerCase()
+    const bold = /bold|black|heavy|semibold|demibold/.test(n)
+    const italic = /italic|oblique/.test(n)
+    let family = 'Helvetica'
+    if (/helvetica|arial|sans|verdana|calibri|roboto|tahoma/.test(n)) family = 'Helvetica'
+    else if (/times|georgia|palatino|serif|book/.test(n)) family = 'Times New Roman'
+    else if (/courier|mono|consolas/.test(n)) family = 'Courier New'
+    return { family, bold, italic }
+  } catch {
+    return { family: 'Helvetica', bold: false, italic: false }
+  }
+}
+
+/** Group OCR word boxes into per-line editable items (overlay coords at `scale`). */
+function groupWordsToItems(
+  words: OcrWordBox[],
+  scale: number,
+  page: number,
+  makeId: () => number,
+): ExistingTextItem[] {
+  if (!words.length) return []
+
+  type Group = { ySum: number; n: number; h: number; words: OcrWordBox[] }
+  const groups: Group[] = []
+  const sorted = [...words].sort((a, b) => a.y0 - b.y0)
+  for (const w of sorted) {
+    const cy = (w.y0 + w.y1) / 2
+    const h = w.y1 - w.y0
+    let g = groups.find(gr => Math.abs(gr.ySum / gr.n - cy) < Math.max(gr.h, h) * 0.6)
+    if (!g) {
+      g = { ySum: cy, n: 1, h, words: [w] }
+      groups.push(g)
+    } else {
+      g.ySum += cy
+      g.n += 1
+      g.h = Math.max(g.h, h)
+      g.words.push(w)
+    }
+  }
+
+  const items: ExistingTextItem[] = []
+  for (const g of groups) {
+    g.words.sort((a, b) => a.x0 - b.x0)
+    let text = ''
+    let prevEnd = 0
+    let maxH = 0
+    for (const w of g.words) {
+      const gap = w.x0 - prevEnd
+      if (text) text += gap > maxH * 0.35 ? ' ' : ''
+      text += w.text
+      prevEnd = Math.max(prevEnd, w.x1)
+      maxH = Math.max(maxH, w.y1 - w.y0)
+    }
+    if (!text.trim()) continue
+
+    const inkTop = Math.min(...g.words.map(w => w.y0))
+    const inkBottom = Math.max(...g.words.map(w => w.y1))
+    const x0 = Math.min(...g.words.map(w => w.x0))
+    // Raw font size in PDF points (preview multiplies by scale, export uses raw)
+    const fontSize = (maxH * 1.05) / scale
+    const height = fontSize * scale * 1.3
+    items.push({
+      id: makeId(),
+      text,
+      originalText: text,
+      x: x0,
+      y: inkTop - (height - (inkBottom - inkTop)) / 2,
+      width: Math.max(prevEnd - x0, 10),
+      height,
+      fontSize,
+      fontFamily: 'Helvetica',
+      fontColor: '#000000',
+      bold: false,
+      italic: false,
+      page,
+      edited: false,
+      source: 'ocr',
+    })
+  }
+  return items
 }
 
 function hexToRgb(hex: string) {
@@ -201,6 +329,8 @@ export default function EditarPdf() {
   const [selectedImage, setSelectedImage] = useState<number | null>(null)
   const [existingTexts, setExistingTexts] = useState<ExistingTextItem[]>([])
   const [selectedExisting, setSelectedExisting] = useState<number | null>(null)
+  const [formFields, setFormFields] = useState<FormField[]>([])
+  const [ocrLoading, setOcrLoading] = useState(false)
 
   // Toolbar state
   const [fontSize, setFontSize] = useState(14)
@@ -236,6 +366,139 @@ export default function EditarPdf() {
   fileRef.current = file
   const newBoxRef = useRef<number | null>(null)
   const boxRefsMap = useRef<Map<number, HTMLDivElement>>(new Map())
+  // OCR bookkeeping: pages already OCR'd (per file), and in-flight jobs
+  const ocrDoneRef = useRef<Set<string>>(new Set())
+  const ocrInFlightRef = useRef<Set<string>>(new Set())
+  const lastScaleRef = useRef<number | null>(null)
+
+  /**
+   * Render the page to an offscreen canvas and OCR it (scanned pages without
+   * a text layer). Word boxes are grouped into per-line editable items.
+   * Results are cached per file+page; zoom is handled by the rescale effect,
+   * or by a ratio correction if OCR finishes after the user zoomed.
+   */
+  const runOcr = async (pageNum: number, sc: number) => {
+    const f = fileRef.current
+    if (!f) return
+    const key = `${f.name}:${pageNum}`
+    if (ocrDoneRef.current.has(key) || ocrInFlightRef.current.has(key)) return
+    ocrInFlightRef.current.add(key)
+    setOcrLoading(true)
+    try {
+      const bytes = await f.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+      const page = await pdf.getPage(pageNum + 1)
+      const viewport = page.getViewport({ scale: sc })
+      const off = document.createElement('canvas')
+      off.width = Math.ceil(viewport.width)
+      off.height = Math.ceil(viewport.height)
+      const ctx = off.getContext('2d')
+      if (!ctx) return
+      await page.render({ canvasContext: ctx, viewport } as never).promise
+      const words = await extractWordsFromImage(off)
+      let items = groupWordsToItems(words, sc, pageNum, () => nextId.current++)
+      // If the user zoomed while OCR was running, map coords to the current scale
+      const cur = lastScaleRef.current
+      if (cur !== null && cur > 0 && cur !== sc) {
+        const r = cur / sc
+        items = items.map(it => ({ ...it, x: it.x * r, y: it.y * r, width: it.width * r, height: it.height * r }))
+      }
+      if (items.length) {
+        setExistingTexts(prev => [
+          ...prev.filter(t => !(t.page === pageNum && t.source === 'ocr')),
+          ...items,
+        ])
+      }
+      ocrDoneRef.current.add(key)
+    } catch (err) {
+      console.error('OCR failed:', err)
+    } finally {
+      ocrInFlightRef.current.delete(key)
+      setOcrLoading(false)
+    }
+  }
+
+  // OCR text items are stored in scaled overlay px — rescale them on zoom
+  // (they cannot be re-extracted cheaply like the text layer).
+  useEffect(() => {
+    const prevScale = lastScaleRef.current
+    if (prevScale !== null && prevScale > 0 && prevScale !== scale) {
+      const r = scale / prevScale
+      setExistingTexts(prev => prev.map(t =>
+        t.source === 'ocr'
+          ? { ...t, x: t.x * r, y: t.y * r, width: t.width * r, height: t.height * r }
+          : t,
+      ))
+    }
+    lastScaleRef.current = scale
+  }, [scale])
+
+  // Extract native AcroForm fields (widget annotations) for the current page
+  useEffect(() => {
+    if (!file) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const bytes = await file.arrayBuffer()
+        const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+        const page = await pdf.getPage(currentPage + 1)
+        const viewport = page.getViewport({ scale })
+        const anns = (await page.getAnnotations()) as any[]
+        const fields: FormField[] = []
+        for (const a of anns) {
+          if (a.subtype !== 'Widget') continue
+          if (a.fieldType !== 'Tx' && a.fieldType !== 'Btn') continue
+          if (!a.fieldName || !a.rect) continue
+          if (a.fieldType === 'Btn' && a.pushButton) continue
+          // rect is [x1,y1,x2,y2] in PDF coords — map both corners to viewport space
+          const p1 = viewport.convertToViewportPoint(a.rect[0], a.rect[1]) as number[]
+          const p2 = viewport.convertToViewportPoint(a.rect[2], a.rect[3]) as number[]
+          const x = Math.min(p1[0], p2[0])
+          const y = Math.min(p1[1], p2[1])
+          const w = Math.abs(p2[0] - p1[0])
+          const h = Math.abs(p2[1] - p1[1])
+          if (w < 4 || h < 4) continue
+
+          let type: FormField['type'] = 'Tx'
+          let checked = false
+          let exportValue: string | undefined
+          if (a.fieldType === 'Btn') {
+            if (a.radioButton) {
+              type = 'Radio'
+              exportValue = typeof a.exportValue === 'string' ? a.exportValue : undefined
+              checked = !!a.fieldValue && a.fieldValue === exportValue
+            } else {
+              type = 'Btn'
+              checked = !!a.fieldValue && a.fieldValue !== 'Off'
+            }
+          }
+          fields.push({
+            name: a.fieldName,
+            type,
+            x, y, width: w, height: h,
+            value: typeof a.fieldValue === 'string' && type === 'Tx' ? a.fieldValue : '',
+            checked,
+            exportValue,
+            page: currentPage,
+            touched: false,
+          })
+        }
+        if (cancelled) return
+        setFormFields(prev => [
+          ...prev.filter(f => f.page !== currentPage),
+          // Preserve user edits when re-extracting (scale/page changes)
+          ...fields.map(f => {
+            const old = prev.find(o => o.page === f.page && o.name === f.name && o.type === f.type && o.exportValue === f.exportValue)
+            return old && old.touched ? { ...f, value: old.value, checked: old.checked, touched: true } : f
+          }),
+        ])
+      } catch {
+        if (!cancelled) setFormFields(prev => prev.filter(f => f.page !== currentPage))
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [file, currentPage, scale])
 
   // Auto-focus newly created text box
   useEffect(() => {
@@ -270,12 +533,12 @@ export default function EditarPdf() {
   useEffect(() => {
     if (!file) return
     const timer = setTimeout(() => {
-      saveState(file.name, { boxes, images, strokes, existingTexts })
+      saveState(file.name, { boxes, images, strokes, existingTexts, formFields })
       setShowSaved(true)
       setTimeout(() => setShowSaved(false), 1500)
     }, 500)
     return () => clearTimeout(timer)
-  }, [boxes, images, strokes, existingTexts, file])
+  }, [boxes, images, strokes, existingTexts, formFields, file])
 
   // Load persisted state when file changes
   useEffect(() => {
@@ -286,6 +549,7 @@ export default function EditarPdf() {
         setImages(saved.images || [])
         setStrokes(saved.strokes || [])
         if (saved.existingTexts) setExistingTexts(saved.existingTexts)
+        if (saved.formFields) setFormFields(saved.formFields)
         // Update nextId
         const maxId = Math.max(
           ...saved.boxes.map(b => b.id),
@@ -327,7 +591,13 @@ export default function EditarPdf() {
       const page = await pdf.getPage(currentPage + 1)
       const textContent = await page.getTextContent()
       const items = textContent.items as any[]
-      if (!items.length) { setExistingTexts(prev => prev.filter(t => t.page !== currentPage)); return }
+      if (!items.length) {
+        // Scanned page: no text layer. Keep any existing OCR items, clear stale
+        // text-layer items, and run OCR over the rendered page image.
+        setExistingTexts(prev => prev.filter(t => t.page !== currentPage || t.source === 'ocr'))
+        void runOcr(currentPage, scale)
+        return
+      }
 
       // Get viewport height for Y-coordinate inversion (PDF y=0 is bottom, CSS top=0 is top)
       const viewport = page.getViewport({ scale })
@@ -422,8 +692,10 @@ export default function EditarPdf() {
                                combinedText.includes('[') ? 'brackets' : ''
 
           const fontName = firstItem.fontName || ''
-          const isBold = /bold/i.test(fontName)
-          const isItalic = /italic|oblique/i.test(fontName)
+          // fontName is an internal id ('g_d0_f1') — resolve the real font via pdf.js internals
+          const realFont = resolveRealFont(page, fontName)
+          const isBold = realFont.bold || /bold/i.test(fontName)
+          const isItalic = realFont.italic || /italic|oblique/i.test(fontName)
 
           // Check if this block was previously edited
           const key = combinedText + '|' + Math.round(y) + '|' + Math.round(x)
@@ -436,22 +708,23 @@ export default function EditarPdf() {
               text: combinedText,
               originalText: combinedText,
               x, y, width, height, fontSize,
-              fontFamily: 'Helvetica',
+              fontFamily: realFont.family,
               fontColor: '#000000',
               bold: isBold,
               italic: isItalic,
               page: currentPage,
               edited: false,
+              source: 'text',
               // New fields for fillable detection
               isFillable,
               fillableType,
-            } as ExistingTextItem & { isFillable?: boolean; fillableType?: string })
+            } as ExistingTextItem)
           }
         }
       }
       nextId.current = id
       setExistingTexts(prev => {
-        const other = prev.filter(t => t.page !== currentPage)
+        const other = prev.filter(t => t.page !== currentPage || t.source === 'ocr')
         return [...other, ...newItems]
       })
     }
@@ -488,7 +761,7 @@ export default function EditarPdf() {
   // ── Undo/Redo ──────────────────────────────────────────
 
   const pushHistory = useCallback(() => {
-    const state: EditorState = { boxes, images, strokes, existingTexts }
+    const state: EditorState = { boxes, images, strokes, existingTexts, formFields }
     setHistory(prev => {
       const newHist = prev.slice(0, historyIndex + 1)
       newHist.push(state)
@@ -496,7 +769,7 @@ export default function EditarPdf() {
       return newHist
     })
     setHistoryIndex(prev => Math.min(prev + 1, 49))
-  }, [boxes, images, strokes, existingTexts, historyIndex])
+  }, [boxes, images, strokes, existingTexts, formFields, historyIndex])
 
   const undo = useCallback(() => {
     if (historyIndex <= 0) return
@@ -505,6 +778,7 @@ export default function EditarPdf() {
     setImages(prev.images)
     setStrokes(prev.strokes)
     if (prev.existingTexts) setExistingTexts(prev.existingTexts)
+    if (prev.formFields) setFormFields(prev.formFields)
     setHistoryIndex(i => i - 1)
   }, [history, historyIndex])
 
@@ -515,6 +789,7 @@ export default function EditarPdf() {
     setImages(next.images)
     setStrokes(next.strokes)
     if (next.existingTexts) setExistingTexts(next.existingTexts)
+    if (next.formFields) setFormFields(next.formFields)
     setHistoryIndex(i => i + 1)
   }, [history, historyIndex])
 
@@ -599,6 +874,29 @@ export default function EditarPdf() {
     setExistingTexts(prev => prev.filter(t => t.id !== id))
     setSelectedExisting(null)
   }, [pushHistory])
+
+  // ── AcroForm field handlers ─────────────────────────────
+
+  const updateFormField = useCallback((target: FormField, updates: Partial<FormField>) => {
+    setFormFields(prev => prev.map(f =>
+      f.page === target.page && f.name === target.name && f.type === target.type && f.exportValue === target.exportValue
+        ? { ...f, ...updates, touched: true }
+        : f,
+    ))
+  }, [])
+
+  const toggleFormField = useCallback((target: FormField, checked: boolean) => {
+    setFormFields(prev => prev.map(f => {
+      if (f.page !== target.page || f.name !== target.name || f.type !== target.type) return f
+      if (target.type === 'Radio') {
+        // Radio groups: only the clicked option stays checked
+        return f.exportValue === target.exportValue
+          ? { ...f, checked: true, touched: true }
+          : { ...f, checked: false }
+      }
+      return { ...f, checked, touched: true }
+    }))
+  }, [])
 
   // ── Image handlers ─────────────────────────────────────
 
@@ -840,10 +1138,33 @@ export default function EditarPdf() {
         if (isBold) key += '-Bold'
         if (isItalic) key += '-Italic'
         if (!fontCache[key]) {
-          const std = fontToPdfLib(name)
+          const std = fontToPdfLib(name, isBold, isItalic)
           fontCache[key] = await pdfDoc.embedFont(std)
         }
         return fontCache[key]
+      }
+
+      // Fill native AcroForm fields (only the ones the user touched)
+      if (formFields.some(f => f.touched)) {
+        const form = pdfDoc.getForm()
+        for (const f of formFields) {
+          if (!f.touched) continue
+          try {
+            if (f.type === 'Tx') {
+              form.getTextField(f.name).setText(f.value)
+            } else if (f.type === 'Btn') {
+              const cb = form.getCheckBox(f.name)
+              if (f.checked) cb.check()
+              else cb.uncheck()
+            } else if (f.type === 'Radio' && f.checked && f.exportValue) {
+              form.getRadioGroup(f.name).select(f.exportValue)
+            }
+          } catch { /* field name/type mismatch — skip */ }
+        }
+        try {
+          // Recompute widget appearances so filled values are visible everywhere
+          await form.updateFieldAppearances()
+        } catch { /* keep original appearances */ }
       }
 
       // White-out and redraw edited existing text
@@ -860,11 +1181,11 @@ export default function EditarPdf() {
           color: rgb(1, 1, 1),
           borderWidth: 0,
         })
-        // Draw edited text
+        // Draw edited text — baseline matched to the preview's line box
         const font = await getFont(item.fontFamily, item.bold, item.italic)
         page.drawText(item.text, {
           x: item.x / scale,
-          y: height - item.y / scale - (item.fontSize * 0.85),
+          y: height - item.y / scale - (item.fontSize * 0.92),
           font,
           size: item.fontSize,
           color: hexToRgb(item.fontColor),
@@ -931,7 +1252,8 @@ export default function EditarPdf() {
   const currentBoxes = boxes.filter(b => b.page === currentPage)
   const currentImages = images.filter(i => i.page === currentPage)
   const currentExisting = existingTexts.filter(t => t.page === currentPage)
-  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0 || existingTexts.some(t => t.edited)
+  const currentFormFields = formFields.filter(f => f.page === currentPage)
+  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0 || existingTexts.some(t => t.edited) || formFields.some(f => f.touched)
 
   /* ── Toolbar ──────────────────────────────────────────── */
 
@@ -1179,12 +1501,20 @@ export default function EditarPdf() {
             </div>
           )}
 
-          {/* PDF + Overlay — canvas hidden when extracted text exists, white background shows editable text only */}
+          {/* OCR indicator — scanned pages without a text layer */}
+          {ocrLoading && (
+            <div className="text-xs mb-2 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              Reconociendo texto del PDF (OCR)...
+            </div>
+          )}
+
+          {/* PDF + Overlay — canvas stays visible; edited text is whiteed out locally */}
           <div className="relative inline-block rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-default)' }}>
-            <canvas ref={canvasRef} className="block" style={currentExisting.length > 0 ? { opacity: 0, pointerEvents: 'none' } : undefined} />
-            {currentExisting.length > 0 && (
-              <div className="absolute inset-0" style={{ background: '#ffffff', zIndex: 0 }} />
-            )}
+            <canvas ref={canvasRef} className="block" />
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0"
@@ -1278,11 +1608,13 @@ export default function EditarPdf() {
                 </div>
               ))}
 
-              {/* Existing text items (editable) */}
-              {currentExisting.map(item => (
+              {/* Existing text items — invisible until selected/edited (canvas shows the original) */}
+              {currentExisting.map(item => {
+                const active = item.edited || selectedExisting === item.id
+                return (
                 <div
                   key={`ext-${item.id}`}
-                  className={`existing-text absolute group cursor-pointer ${selectedExisting === item.id ? 'ring-2 ring-emerald-400' : ''}`}
+                  className={`existing-text absolute group cursor-pointer outline-1 outline-dashed outline-transparent hover:outline-emerald-500/60 ${selectedExisting === item.id ? 'ring-2 ring-emerald-400' : ''}`}
                   style={{ left: item.x, top: item.y }}
                   onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
                 >
@@ -1306,21 +1638,24 @@ export default function EditarPdf() {
                       </svg>
                     </button>
                   </div>
-                  {/* Editable text */}
+                  {/* Editable text — same font size as export (no 0.75 factor) */}
                   <TextEditor
                     value={item.text}
-                    className="min-w-[40px] min-h-[16px] px-1 py-0.5 outline-none whitespace-pre-wrap"
+                    className="min-w-[40px] outline-none whitespace-pre"
                     style={{
-                      fontSize: item.fontSize * scale * 0.75,
+                      fontSize: item.fontSize * scale,
                       fontFamily: item.fontFamily,
-                      color: item.edited ? '#047857' : '#0f172a',
-                      backgroundColor: item.edited ? 'rgba(16,185,129,0.1)' : 'transparent',
+                      color: active ? (item.edited ? (item.fontColor || '#0f172a') : '#0f172a') : 'transparent',
+                      backgroundColor: active ? '#ffffff' : 'transparent',
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
-                      border: selectedExisting === item.id
-                        ? '2px solid #10b981'
-                        : '1.5px dashed rgba(16,185,129,0.35)',
+                      height: item.height,
+                      boxSizing: 'border-box',
+                      padding: 0,
+                      border: active
+                        ? (selectedExisting === item.id ? '2px solid #10b981' : '1.5px dashed rgba(16,185,129,0.6)')
+                        : '1.5px dashed transparent',
                       borderRadius: '3px',
                       lineHeight: 1.3,
                       backdropFilter: 'none',
@@ -1336,7 +1671,8 @@ export default function EditarPdf() {
                     </span>
                   )}
                 </div>
-              ))}
+                )
+              })}
 
               {/* Images */}
               {currentImages.map(img => (
@@ -1375,6 +1711,58 @@ export default function EditarPdf() {
                   />
                 </div>
               ))}
+
+              {/* Native AcroForm fields — real inputs positioned over the form */}
+              {currentFormFields.map(f => {
+                const pos = { left: f.x, top: f.y, width: f.width, height: f.height }
+                if (f.type === 'Tx') {
+                  return (
+                    <input
+                      key={`ff-${f.page}-${f.name}-Tx`}
+                      type="text"
+                      value={f.value}
+                      onChange={e => updateFormField(f, { value: e.target.value })}
+                      onClick={e => e.stopPropagation()}
+                      className="absolute focus:ring-1 focus:ring-sky-400 focus:bg-white/70"
+                      style={{
+                        ...pos,
+                        fontSize: Math.max(9, f.height * 0.62),
+                        lineHeight: `${f.height}px`,
+                        fontFamily: 'Helvetica, Arial, sans-serif',
+                        color: '#0f172a',
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        padding: '0 2px',
+                        boxSizing: 'border-box',
+                        pointerEvents: mode === 'draw' ? 'none' : 'auto',
+                      }}
+                    />
+                  )
+                }
+                // Btn (checkbox) and Radio — centered in the widget rect
+                const size = Math.min(Math.max(Math.min(f.width, f.height), 12), 24)
+                return (
+                  <input
+                    key={`ff-${f.page}-${f.name}-${f.type}-${f.exportValue || ''}`}
+                    type={f.type === 'Radio' ? 'radio' : 'checkbox'}
+                    name={`ff-${f.page}-${f.name}`}
+                    checked={f.checked}
+                    onChange={e => toggleFormField(f, e.target.checked)}
+                    onClick={e => e.stopPropagation()}
+                    className="absolute cursor-pointer"
+                    style={{
+                      left: f.x + (f.width - size) / 2,
+                      top: f.y + (f.height - size) / 2,
+                      width: size,
+                      height: size,
+                      margin: 0,
+                      accentColor: '#0ea5e9',
+                      pointerEvents: mode === 'draw' ? 'none' : 'auto',
+                    }}
+                  />
+                )
+              })}
             </div>
           </div>
 
