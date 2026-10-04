@@ -1,10 +1,10 @@
 # PDF Tools - Handoff para Siguiente Sesión
 
-**Fecha:** Septiembre 2026
+**Fecha:** Octubre 2026
 **Repositorio:** github.com/alan-mccurdy/pdf-tools
 **Deploy Target:** GitHub Pages (https://alan-mccurdy.github.io/pdf-tools/)
 
-## Estado Actual - WORK IN PROGRESS
+## Estado Actual - BUILD VERDE ✅ (Oct 2026)
 
 ### ✅ Trabajo Completado
 
@@ -16,40 +16,26 @@
 6. **Lazy Loading** - Implementado en App.tsx con React.lazy
 7. **Tooltip Component** - Creado en src/components/Help/Tooltip.tsx
 
-### ⚠️ Errores de TypeScript (PRIORIDAD ALTA)
+### ✅ Errores de TypeScript - RESUELTOS (Oct 2026)
 
-Hay errores de compilación que DEBEN ser resueltos antes del deploy:
+`tsc -b` → 0 errores. `npm run build` → exit 0.
 
-**Archivos con errores:**
-- src/App.tsx (lazy/Suspense from wrong import)
-- src/components/UI/LoadingSpinner.tsx (needs to be created OR used inline)
-- src/pages/OCRedor.tsx (pdfjs render parameter issue)
-- src/utils/ocrService.ts (tesseract.js type issues)
+**Fixes aplicados:**
+- `src/App.tsx` — removido import `React` sin usar (quedaba `import { lazy, Suspense } from 'react'`)
+- `src/components/Help/Tooltip.tsx` — removido `useCallback` sin usar
+- `src/utils/ocrService.ts` — **migrado de API tesseract.js v4 → v7** (instalado en package.json):
+  - `createWorker('eng+spa')` reemplaza a `load()` + `loadLanguage()` + `initialize()` (v7 los hace internamente)
+  - `recognize(imageData)` ya no recibe idiomas como 2º argumento
 
-## 🔧 Comandos para Finalizar
+> ⚠️ Gotcha: si se toque el OCR, la API de tesseract.js v7 NO tiene `worker.loadLanguage`/`worker.initialize`.
+
+## 🔧 Comandos Útiles
 
 ```bash
-# Navegar al proyecto
-cd C:\Users\Alan\pdf-tools
+cd C:\Users\Allen\proyectos\pdf-tools
 
-# Verificar TypeScript
-npx tsc -b
-
-# Fix para App.tsx - cambiar:
-# import { Routes, Route, lazy, Suspense } from 'react-router-dom'
-# Por:
-# import { Routes, Route } from 'react-router-dom'
-# import React, { lazy, Suspense } from 'react'
-
-# Build
-npm run build
-
-# Commit
-git add -A
-git commit -m "feat: complete PDF Tools enhancement - OCR, PWA, performance"
-
-# Push
-git push
+npx tsc -b   # verificar TypeScript
+npm run build # build producción (tsc -b && vite build)
 ```
 
 ## 📁 Archivos Creados
@@ -67,15 +53,17 @@ git push
 
 - **Repo:** github.com/alan-mccurdy/pdf-tools
 - **URL final:** https://alan-mccurdy.github.io/pdf-tools/
-- **Branch:** main (o gh-pages si está configurado)
+- **Branch:** `master` (el workflow `.github/workflows/deploy.yml` despliega en push a master)
 
 ## 🎯 Próximos Pasos
 
-1. Resolver errores TypeScript
-2. Verificar build exitoso
-3. Commit final
-4. Push a GitHub
-5. Verificar GitHub Pages está actualizado
+1. ~~Resolver errores TypeScript~~ ✅
+2. ~~Verificar build exitoso~~ ✅
+3. ~~Commit final~~ ✅
+4. ~~Push a GitHub~~ ✅
+5. ~~Verificar GitHub Pages está actualizado~~ ✅
+
+**Ideas futuras:** code-splitting para los chunks >500 kB (pdfjs/tesseract), tests.
 
 ---
 

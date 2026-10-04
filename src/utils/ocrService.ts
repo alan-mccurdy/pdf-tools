@@ -11,11 +11,10 @@ export async function initOCR(): Promise<Worker | null> {
   if (ocrWorker) return ocrWorker
   
   try {
+    // tesseract.js v7: createWorker loads, downloads languages and
+    // initializes the engine internally. Languages go in the first arg.
     const worker = await createWorker('eng+spa')
-    
-    await worker.load()
-    await worker.reinitialize('eng+spa')
-    
+
     ocrWorker = worker
     return ocrWorker
   } catch (error) {
@@ -33,6 +32,7 @@ export async function extractTextFromImage(imageData: string): Promise<string> {
   if (!ocrWorker) return ''
   
   try {
+    // Languages are already set on the worker; recognize() takes only the image
     const result = await ocrWorker.recognize(imageData)
     return result.data.text
   } catch (error) {
