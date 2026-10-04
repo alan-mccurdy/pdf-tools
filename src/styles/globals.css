@@ -370,14 +370,6 @@ body {
   50% { box-shadow: 0 0 0 6px rgba(125, 211, 252, 0.06); }
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
 /* └─ Utility ────────────────────────────────────────────── */
 
 .no-scrollbar::-webkit-scrollbar { display: none; }

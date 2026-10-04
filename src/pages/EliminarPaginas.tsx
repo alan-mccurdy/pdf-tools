@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PDFDocument } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
-import PageSelector from '../components/PDF/PageSelector'
+import PageThumbnailGrid from '../components/PDF/PageThumbnailGrid'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { usePdfDocument } from '../hooks/usePdfDocument'
 import { savePdf } from '../utils/pdfHelpers'
@@ -35,10 +35,15 @@ export default function EliminarPaginas() {
       keyword="Eliminar Paginas"
     >
       <PDFUploader onFiles={f => f[0] && load(f[0])} />
-      {pages.length > 0 && (
+      {pdfDoc && pages.length > 0 && (
         <>
-          <p className="text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>Selecciona las paginas que quieres ELIMINAR:</p>
-          <PageSelector pages={pages} selected={toDelete} onSelect={setToDelete} />
+          <PageThumbnailGrid
+            pdfDoc={pdfDoc}
+            pages={pages}
+            selected={toDelete}
+            onSelect={setToDelete}
+            label="Selecciona las paginas que quieres ELIMINAR:"
+          />
           <DownloadButton
             onClick={handleDownload}
             disabled={!toDelete.length}

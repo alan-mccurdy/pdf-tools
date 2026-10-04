@@ -15,6 +15,10 @@ const ComprimirPdf = lazy(() => import('./pages/ComprimirPdf'))
 const InsertarImagenes = lazy(() => import('./pages/InsertarImagenes'))
 const PdfAWord = lazy(() => import('./pages/PdfAWord'))
 const OCRedor = lazy(() => import('./pages/OCRedor'))
+const Privacidad = lazy(() => import('./pages/Privacidad'))
+const Terminos = lazy(() => import('./pages/Terminos'))
+const Acerca = lazy(() => import('./pages/Acerca'))
+const Contacto = lazy(() => import('./pages/Contacto'))
 
 function App() {
   return (
@@ -34,6 +38,10 @@ function App() {
             <Route path="/insertar-imagenes" element={<InsertarImagenes />} />
             <Route path="/pdf-a-word" element={<PdfAWord />} />
             <Route path="/ocr-pdf" element={<OCRedor />} />
+            <Route path="/privacidad" element={<Privacidad />} />
+            <Route path="/terminos" element={<Terminos />} />
+            <Route path="/acerca" element={<Acerca />} />
+            <Route path="/contacto" element={<Contacto />} />
             <Route path="/404" element={<NotFound />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

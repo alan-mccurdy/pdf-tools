@@ -10,7 +10,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mi
 
 // --- Word XML parsing functions (ported from original editor-pdf.html) ---
 function wXmlDecode(s: string): string {
-  return s.replace(/</g, '<').replace(/>/g, '>').replace(/&/g, '&').replace(/"/g, '"').replace(/&apos;/g, "'")
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
 }
 
 function wFmtColor(hex: string) {
@@ -264,6 +264,7 @@ export default function WordAPdf() {
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
   const [previewPage, setPreviewPage] = useState(1)
   const [totalPreviewPages, setTotalPreviewPages] = useState(0)
+  const [convertError, setConvertError] = useState<string | null>(null)
   const previewRef = useRef<HTMLCanvasElement>(null)
 
   const showPreview = useCallback(async (bytes: Uint8Array, pageNum: number = 1) => {
@@ -274,13 +275,14 @@ export default function WordAPdf() {
 
   const handleConvert = async () => {
     if (!file) return
+    setConvertError(null)
     setLoading(true)
     try {
       const bytes = await wDocxToPdf(file)
       setPdfBytes(bytes)
       setPreviewPage(1)
     } catch (err: any) {
-      alert('Error: ' + err.message)
+      setConvertError(err.message)
     } finally {
       setLoading(false)
     }
@@ -343,6 +345,12 @@ export default function WordAPdf() {
           </button>
         )}
       </div>
+
+      {convertError && (
+        <div className="mt-3 p-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+          Error: {convertError}
+        </div>
+      )}
 
       {/* PDF Preview */}
       {pdfBytes && (

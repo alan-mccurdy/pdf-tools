@@ -3,12 +3,16 @@ import { useEffect, useRef } from 'react'
 interface AdSlotProps {
   position: 'top' | 'sidebar' | 'bottom'
   className?: string
+  adClient?: string
+  adSlot?: string
 }
 
-export default function AdSlot({ position, className = '' }: AdSlotProps) {
+export default function AdSlot({ position, className = '', adClient, adSlot }: AdSlotProps) {
   const adRef = useRef<HTMLDivElement>(null)
+  const isPlaceholder = !adClient || !adSlot || adClient.includes('XXXXXXXX') || adSlot.includes('XXXXXXXX')
 
   useEffect(() => {
+    if (isPlaceholder) return
     try {
       if (adRef.current && typeof window !== 'undefined') {
         (window as any).adsbygoogle = (window as any).adsbygoogle || [];
@@ -17,32 +21,20 @@ export default function AdSlot({ position, className = '' }: AdSlotProps) {
     } catch (e) {
       console.error('AdSense error:', e)
     }
-  }, [])
+  }, [isPlaceholder])
+
+  if (isPlaceholder) return null
 
   return (
     <div className={`ad-slot ad-${position} ${className}`} ref={adRef}>
       <ins
         className="adsbygoogle"
         style={{ display: 'block' }}
-        data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
-        data-ad-slot="XXXXXXXXXX"
+        data-ad-client={adClient}
+        data-ad-slot={adSlot}
         data-ad-format="auto"
         data-full-width-responsive="true"
       />
-      {/* Fallback visible while AdSense loads or if blocked */}
-      <div
-        className="flex items-center justify-center rounded-lg"
-        style={{
-          minHeight: position === 'sidebar' ? '250px' : '90px',
-          background: 'var(--surface-1)',
-          border: '1px dashed var(--border-subtle)',
-          color: 'var(--text-tertiary)',
-          fontSize: '11px',
-          letterSpacing: '0.05em',
-        }}
-      >
-        Advertisement
-      </div>
     </div>
   )
 }

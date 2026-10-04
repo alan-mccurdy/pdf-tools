@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
-import { degrees } from 'pdf-lib'
+import { PDFDocument, degrees } from 'pdf-lib'
+import * as pdfjsLib from 'pdfjs-dist'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { usePdfDocument } from '../hooks/usePdfDocument'
 import { savePdf } from '../utils/pdfHelpers'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
 export default function RotarPdf() {
   const { pdfDoc, pages, fileName, load } = usePdfDocument()
@@ -19,8 +22,6 @@ export default function RotarPdf() {
     if (!pdfDoc || pages.length === 0) return
     let cancelled = false
     const render = async () => {
-      const pdfjsLib = await import('pdfjs-dist')
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
       const bytes = await pdfDoc.save()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
       const urls: string[] = []
@@ -45,7 +46,7 @@ export default function RotarPdf() {
     setLoading(true)
     try {
       const pdfBytes = await pdfDoc.save()
-      const newDoc = await import('pdf-lib').then(m => m.PDFDocument.load(pdfBytes))
+      const newDoc = await PDFDocument.load(pdfBytes)
       const pagesToRotate = applyTo === 'all'
         ? pages.map(p => p.index)
         : selected

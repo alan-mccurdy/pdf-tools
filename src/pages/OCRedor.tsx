@@ -11,12 +11,16 @@ export default function OCRedor() {
   const [extractedText, setExtractedText] = useState('')
   const [loading, setLoading] = useState(false)
   const [pages, setPages] = useState<Array<{ url: string; text: string }>>([])
+  const [ocrError, setOcrError] = useState<string | null>(null)
+  const [totalPages, setTotalPages] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const handleFile = useCallback((file: File) => {
     setFile(file)
     setExtractedText('')
     setPages([])
+    setOcrError(null)
+    setTotalPages(0)
   }, [])
 
   const handleOCR = useCallback(async () => {
@@ -26,11 +30,12 @@ export default function OCRedor() {
     try {
       const bytes = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
-      const totalPages = pdf.numPages
+      const numPages = pdf.numPages
+      setTotalPages(numPages)
       
       const newPages = []
       
-      for (let i = 0; i < Math.min(totalPages, 10); i++) {
+      for (let i = 0; i < Math.min(numPages, 10); i++) {
         const page = await pdf.getPage(i + 1)
         const viewport = page.getViewport({ scale: 2 })
         
@@ -63,7 +68,7 @@ export default function OCRedor() {
       
     } catch (err) {
       console.error('OCR error:', err)
-      alert('Error processing document. Please try again.')
+      setOcrError('Error processing document. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -103,6 +108,18 @@ export default function OCRedor() {
               <strong>Archivo:</strong> {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
             </p>
           </div>
+
+          {totalPages > 10 && (
+            <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.3)', color: '#fde68a' }}>
+              Este documento tiene {totalPages} paginas. Solo se procesaran las primeras 10 por limitaciones de rendimiento.
+            </div>
+          )}
+
+          {ocrError && (
+            <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+              {ocrError}
+            </div>
+          )}
 
           <button
             onClick={handleOCR}

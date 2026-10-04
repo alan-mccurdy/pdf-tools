@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PDFDocument } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
-import PageSelector from '../components/PDF/PageSelector'
+import PageThumbnailGrid from '../components/PDF/PageThumbnailGrid'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { usePdfDocument } from '../hooks/usePdfDocument'
 import { savePdf } from '../utils/pdfHelpers'
@@ -32,10 +32,15 @@ export default function SepararPdf() {
       keyword="Separar PDF"
     >
       <PDFUploader onFiles={f => f[0] && load(f[0])} />
-      {pages.length > 0 && (
+      {pdfDoc && pages.length > 0 && (
         <>
-          <p className="text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>Selecciona las paginas que quieres extraer:</p>
-          <PageSelector pages={pages} selected={selected} onSelect={setSelected} />
+          <PageThumbnailGrid
+            pdfDoc={pdfDoc}
+            pages={pages}
+            selected={selected}
+            onSelect={setSelected}
+            label="Selecciona las paginas que quieres extraer:"
+          />
           <DownloadButton
             onClick={handleDownload}
             disabled={!selected.length}

@@ -14,8 +14,6 @@ interface PlacedImage {
   imgSrc: string
 }
 
-let imgIdCounter = 0
-
 export default function InsertarImagenes() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [imgFile, setImgFile] = useState<File | null>(null)
@@ -26,7 +24,10 @@ export default function InsertarImagenes() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null)
   const [resizing, setResizing] = useState<{ id: string; handle: string; startX: number; startY: number; startW: number; startH: number; startImgX: number; startImgY: number } | null>(null)
+  const [scale, setScale] = useState(1.5)
+  const imgIdCounterRef = useRef(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const objectUrlsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (!pdfFile) return
@@ -35,7 +36,7 @@ export default function InsertarImagenes() {
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
       setTotalPages(pdf.numPages)
       const page = await pdf.getPage(currentPage + 1)
-      const viewport = page.getViewport({ scale: 1.5 })
+      const viewport = page.getViewport({ scale })
       const canvas = canvasRef.current
       if (!canvas) return
       canvas.width = viewport.width
@@ -44,7 +45,15 @@ export default function InsertarImagenes() {
       await page.render({ canvasContext: ctx, viewport } as never).promise
     }
     render()
-  }, [pdfFile, currentPage])
+  }, [pdfFile, currentPage, scale])
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      objectUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+      objectUrlsRef.current.clear()
+    }
+  }, [])
 
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!imgFile) return
@@ -53,7 +62,8 @@ export default function InsertarImagenes() {
     const y = e.clientY - rect.top
     const bytes = new Uint8Array(await imgFile.arrayBuffer())
     const imgSrc = URL.createObjectURL(new Blob([bytes]))
-    const id = `img-${++imgIdCounter}`
+    objectUrlsRef.current.add(imgSrc)
+    const id = `img-${++imgIdCounterRef.current}`
     setImages(prev => [...prev, { id, x: x - 75, y: y - 75, width: 150, height: 150, page: currentPage, imgBytes: bytes, imgSrc }])
     setSelectedId(id)
   }
@@ -132,6 +142,11 @@ export default function InsertarImagenes() {
   }, [])
 
   const handleDeleteImage = (id: string) => {
+    const img = images.find(i => i.id === id)
+    if (img) {
+      URL.revokeObjectURL(img.imgSrc)
+      objectUrlsRef.current.delete(img.imgSrc)
+    }
     setImages(prev => prev.filter(img => img.id !== id))
     if (selectedId === id) setSelectedId(null)
   }
@@ -153,10 +168,10 @@ export default function InsertarImagenes() {
         const page = pdfDoc.getPage(img.page)
         const { height } = page.getSize()
         page.drawImage(embedded, {
-          x: img.x / 1.5,
-          y: height - img.y / 1.5 - img.height / 1.5,
-          width: img.width / 1.5,
-          height: img.height / 1.5,
+          x: img.x / scale,
+          y: height - img.y / scale - img.height / scale,
+          width: img.width / scale,
+          height: img.height / scale,
         })
       }
 
@@ -196,6 +211,21 @@ export default function InsertarImagenes() {
 
       {pdfFile && (
         <div className="mt-4">
+          {/* Zoom slider */}
+          <div className="mb-3 flex items-center gap-3">
+            <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>Zoom:</label>
+            <input
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.1}
+              value={scale}
+              onChange={e => setScale(parseFloat(e.target.value))}
+              className="flex-1 max-w-[200px]"
+            />
+            <span className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>{scale.toFixed(1)}x</span>
+          </div>
+
           <div
             className="relative inline-block"
             onMouseMove={handleMouseMove}
@@ -294,7 +324,12 @@ export default function InsertarImagenes() {
             />
             {images.length > 0 && (
               <button
-                onClick={() => { setImages([]); setSelectedId(null) }}
+                onClick={() => {
+                  images.forEach(img => URL.revokeObjectURL(img.imgSrc))
+                  objectUrlsRef.current.clear()
+                  setImages([])
+                  setSelectedId(null)
+                }}
                 className="spatial-btn text-sm"
               >
                 Limpiar todo

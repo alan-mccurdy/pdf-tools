@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import { PDFDocument } from 'pdf-lib'
+import * as pdfjsLib from 'pdfjs-dist'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { savePdf } from '../utils/pdfHelpers'
 
-interface MergeItem { name: string; bytes: Uint8Array; pages: number }
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString()
+
+interface MergeItem { name: string; bytes: Uint8Array; pages: number; thumbnail?: string }
 
 export default function UnirPdf() {
   const [items, setItems] = useState<MergeItem[]>([])
@@ -18,7 +24,20 @@ export default function UnirPdf() {
     for (const file of files) {
       const bytes = new Uint8Array(await file.arrayBuffer())
       const doc = await PDFDocument.load(bytes)
-      newItems.push({ name: file.name, bytes, pages: doc.getPageCount() })
+      // Render first page as thumbnail
+      let thumbnail: string | undefined
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise
+        const page = await pdf.getPage(1)
+        const viewport = page.getViewport({ scale: 0.4 })
+        const canvas = document.createElement('canvas')
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+        const ctx = canvas.getContext('2d')!
+        await page.render({ canvasContext: ctx, viewport } as any).promise
+        thumbnail = canvas.toDataURL('image/png')
+      } catch { /* ignore thumbnail errors */ }
+      newItems.push({ name: file.name, bytes, pages: doc.getPageCount(), thumbnail })
     }
     setItems(prev => [...prev, ...newItems])
   }
@@ -96,9 +115,24 @@ export default function UnirPdf() {
                 <span className="text-xs font-mono w-5 text-center" style={{ color: 'var(--text-tertiary)' }}>
                   {idx + 1}
                 </span>
-                <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 8h16M4 16h16" />
-                </svg>
+                {item.thumbnail ? (
+                  <img
+                    src={item.thumbnail}
+                    alt={item.name}
+                    className="w-10 h-14 object-contain rounded flex-shrink-0"
+                    style={{ background: 'var(--surface-1)' }}
+                  />
+                ) : (
+                  <div
+                    className="w-10 h-14 rounded flex-shrink-0 flex items-center justify-center"
+                    style={{ background: 'var(--surface-1)', color: 'var(--text-tertiary)' }}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                )}
                 <span className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{item.name}</span>
                 <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>({item.pages} pag.)</span>
               </div>

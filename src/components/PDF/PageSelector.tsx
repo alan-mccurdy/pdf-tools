@@ -2,18 +2,15 @@ interface PageSelectorProps {
   pages: { index: number }[]
   selected: number[]
   onSelect: (indices: number[]) => void
-  mode?: 'multiple' | 'range'
 }
 
-export default function PageSelector({ pages, selected, onSelect, mode = 'multiple' }: PageSelectorProps) {
+export default function PageSelector({ pages, selected, onSelect }: PageSelectorProps) {
   const toggle = (idx: number) => {
-    if (mode === 'multiple') {
-      onSelect(
-        selected.includes(idx)
-          ? selected.filter(i => i !== idx)
-          : [...selected, idx]
-      )
-    }
+    onSelect(
+      selected.includes(idx)
+        ? selected.filter(i => i !== idx)
+        : [...selected, idx]
+    )
   }
 
   return (

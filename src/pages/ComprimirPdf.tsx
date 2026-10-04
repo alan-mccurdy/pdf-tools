@@ -26,6 +26,7 @@ export default function ComprimirPdf() {
   const [originalSize, setOriginalSize] = useState(0)
   const [resultSize, setResultSize] = useState<number | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [compressError, setCompressError] = useState<string | null>(null)
 
   const handleFiles = (files: File[]) => {
     if (files[0]) {
@@ -38,6 +39,7 @@ export default function ComprimirPdf() {
 
   const handleCompress = async () => {
     if (!file) return
+    setCompressError(null)
     setLoading(true)
     try {
       const arrayBuffer = await file.arrayBuffer()
@@ -65,6 +67,8 @@ export default function ComprimirPdf() {
       // Create preview
       const previewUrlVal = URL.createObjectURL(compressedBlob)
       setPreviewUrl(previewUrlVal)
+    } catch (err: any) {
+      setCompressError(err.message || 'Error al comprimir el PDF. Intenta con otro preset.')
     } finally {
       setLoading(false)
     }
@@ -102,7 +106,7 @@ export default function ComprimirPdf() {
               {PRESETS.map(p => (
                 <button
                   key={p.name}
-                  onClick={() => setPreset(p.name)}
+                  onClick={() => { setPreset(p.name); setCompressError(null) }}
                   className={`spatial-btn text-left px-3 py-2 text-sm ${preset === p.name ? '!border-[var(--accent)] !bg-[var(--accent-soft)]' : ''}`}
                 >
                   <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{p.label}</div>
@@ -111,6 +115,12 @@ export default function ComprimirPdf() {
               ))}
             </div>
           </div>
+
+          {compressError && (
+            <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+              {compressError}
+            </div>
+          )}
 
           {!resultSize ? (
             <DownloadButton onClick={handleCompress} loading={loading} label="Comprimir PDF" />

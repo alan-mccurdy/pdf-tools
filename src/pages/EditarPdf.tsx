@@ -59,6 +59,9 @@ interface ExistingTextItem {
   italic: boolean
   page: number
   edited: boolean
+  // Fillable field detection
+  isFillable?: boolean
+  fillableType?: 'underscore' | 'dots' | 'checkbox' | 'brackets' | ''
 }
 
 interface EditorState {
@@ -275,7 +278,7 @@ export default function EditarPdf() {
     render()
   }, [file, currentPage, scale])
 
-  // Extract existing text items from PDF page
+  // Extract existing text items from PDF page with column/table/field detection
   useEffect(() => {
     if (!file) return
     const extract = async () => {
@@ -290,71 +293,120 @@ export default function EditarPdf() {
       const viewport = page.getViewport({ scale })
       const viewportHeight = viewport.height
 
-      // Group by Y-coordinate (within 3px tolerance at scale) to form lines
+      // Filter valid items with position
+      const validItems = items.filter(i => i.str?.trim() && i.transform).map(i => ({
+        str: i.str,
+        transform: i.transform,
+        fontName: i.fontName || '',
+        width: i.width || 0,
+        height: i.height || 0,
+        dir: i.dir || 'ltr',
+      }))
+
+      // Group by Y-coordinate (lines) with 3px tolerance
       const Y_TOLERANCE = 3
-      const lines: { items: any[]; y: number }[] = []
-      for (const item of items) {
-        if (!item.str?.trim()) continue
+      const lines: { items: typeof validItems; y: number; minX: number; maxX: number }[] = []
+      for (const item of validItems) {
         const tx = item.transform
-        // transform: [scaleX, skewX, skewY, scaleY, translateX, translateY]
         const itemY = tx[5]
         const existing = lines.find(l => Math.abs(l.y - itemY) < Y_TOLERANCE)
         if (existing) {
           existing.items.push(item)
+          existing.minX = Math.min(existing.minX, tx[4])
+          existing.maxX = Math.max(existing.maxX, tx[4])
         } else {
-          lines.push({ items: [item], y: itemY })
+          lines.push({ items: [item], y: itemY, minX: tx[4], maxX: tx[4] })
         }
       }
 
-      // Sort items in each line by X position
-      for (const line of items.length ? lines : []) {
-        line.items.sort((a: any, b: any) => a.transform[4] - b.transform[4])
-      }
+      // Sort lines top to bottom (PDF y=0 is bottom, so higher y = higher on page)
+      lines.sort((a, b) => b.y - a.y)
 
-      // Check if we already have persisted edits for this page
+      // Within each line, detect columns by grouping items with large X gaps
+      // A column break is when gap > 2x average char width
+      const allItems = validItems
+      const avgCharWidth = allItems.length > 0
+        ? allItems.reduce((sum, i) => sum + (i.width || i.str.length * (Math.abs(i.transform[3]) || 12) * 0.6), 0) / allItems.length
+        : 12 * 0.6
+      const COL_GAP_THRESHOLD = avgCharWidth * 3  // 3x avg char width = column separator
+
+      // Process each line: split into columns, detect fillable patterns
       const existingForPage = existingTexts.filter(t => t.page === currentPage)
-      const existingMap = new Map(existingForPage.map(t => [t.originalText + '|' + Math.round(t.y), t]))
+      const existingMap = new Map(existingForPage.map(t => [t.originalText + '|' + Math.round(t.y) + '|' + Math.round(t.x), t]))
 
       const newItems: ExistingTextItem[] = []
       let id = nextId.current
+
       for (const line of lines) {
-        const combinedText = line.items.map((i: any) => i.str).join(' ')
-        const firstItem = line.items[0]
-        const tx = firstItem.transform
-        const fontSize = Math.abs(tx[3]) || 12  // raw PDF font size (no scale)
-        const x = tx[4] * scale
-        // Invert Y: PDF y=0 is bottom, CSS top=0 is top
-        const y = viewportHeight - tx[5] * scale - fontSize * scale
-        // Calculate width from last item
-        const lastItem = line.items[line.items.length - 1]
-        const lastItemWidth = lastItem.width || lastItem.str.length * fontSize * 0.6
-        const endX = (lastItem.transform[4] + lastItemWidth) * scale
-        const width = Math.max(endX - x, 60)
-        const height = fontSize * scale * 1.3
+        // Sort items in line by X
+        line.items.sort((a, b) => a.transform[4] - b.transform[4])
 
-        // Detect bold from font name
-        const fontName = firstItem.fontName || ''
-        const isBold = /bold/i.test(fontName)
-        const isItalic = /italic|oblique/i.test(fontName)
+        // Split line into columns based on X gaps
+        const columns: typeof line.items[] = []
+        let currentCol: typeof line.items = []
+        for (const item of line.items) {
+          if (currentCol.length === 0) {
+            currentCol = [item]
+          } else {
+            const last = currentCol[currentCol.length - 1]
+            const gap = item.transform[4] - (last.transform[4] + (last.width || last.str.length * (Math.abs(last.transform[3]) || 12) * 0.6))
+            if (gap > COL_GAP_THRESHOLD) {
+              columns.push(currentCol)
+              currentCol = [item]
+            } else {
+              currentCol.push(item)
+            }
+          }
+        }
+        if (currentCol.length) columns.push(currentCol)
 
-        // Check if this line was previously edited
-        const key = combinedText + '|' + Math.round(y)
-        const prev = existingMap.get(key)
-        if (prev) {
-          newItems.push({ ...prev, id: prev.id })
-        } else {
-          newItems.push({
-            id: id++,
-            text: combinedText,
-            originalText: combinedText,
-            x, y, width, height, fontSize,
-            fontFamily: 'Helvetica',
-            fontColor: '#000000',
-            bold: isBold,
-            italic: isItalic,
-            page: currentPage,
-            edited: false,
-          })
+        // Process each column as a separate text block
+        for (const col of columns) {
+          const combinedText = col.map(i => i.str).join(' ')
+          const firstItem = col[0]
+          const tx = firstItem.transform
+          const fontSize = Math.abs(tx[3]) || 12
+          const x = tx[4] * scale
+          const y = viewportHeight - tx[5] * scale - fontSize * scale
+          const lastItem = col[col.length - 1]
+          const lastItemWidth = lastItem.width || lastItem.str.length * fontSize * 0.6
+          const endX = (lastItem.transform[4] + lastItemWidth) * scale
+          const width = Math.max(endX - x, 60)
+          const height = fontSize * scale * 1.3
+
+          // Detect fillable patterns in the text
+          const isFillable = /_{3,}|\.{5,}|☐|\[\s*\]|□/.test(combinedText)
+          const fillableType = combinedText.includes('_') ? 'underscore' :
+                               combinedText.includes('.') ? 'dots' :
+                               combinedText.includes('☐') ? 'checkbox' :
+                               combinedText.includes('[') ? 'brackets' : ''
+
+          const fontName = firstItem.fontName || ''
+          const isBold = /bold/i.test(fontName)
+          const isItalic = /italic|oblique/i.test(fontName)
+
+          // Check if this block was previously edited
+          const key = combinedText + '|' + Math.round(y) + '|' + Math.round(x)
+          const prev = existingMap.get(key)
+          if (prev) {
+            newItems.push({ ...prev, id: prev.id })
+          } else {
+            newItems.push({
+              id: id++,
+              text: combinedText,
+              originalText: combinedText,
+              x, y, width, height, fontSize,
+              fontFamily: 'Helvetica',
+              fontColor: '#000000',
+              bold: isBold,
+              italic: isItalic,
+              page: currentPage,
+              edited: false,
+              // New fields for fillable detection
+              isFillable,
+              fillableType,
+            } as ExistingTextItem & { isFillable?: boolean; fillableType?: string })
+          }
         }
       }
       nextId.current = id
@@ -1087,12 +1139,9 @@ export default function EditarPdf() {
             </div>
           )}
 
-          {/* PDF + Overlay — canvas hidden when text items exist, white background shows extracted text only */}
+          {/* PDF + Overlay — always show PDF, overlay extracted text on top */}
           <div className="relative inline-block rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-default)' }}>
-            <canvas ref={canvasRef} className="block" style={currentExisting.length > 0 ? { opacity: 0, pointerEvents: 'none' } : undefined} />
-            {currentExisting.length > 0 && (
-              <div className="absolute inset-0" style={{ background: '#ffffff', zIndex: 0 }} />
-            )}
+            <canvas ref={canvasRef} className="block" />
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0"
@@ -1105,7 +1154,7 @@ export default function EditarPdf() {
             <div
               ref={overlayRef}
               className="absolute inset-0"
-              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none', zIndex: 1 }}
+              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none' }}
               onClick={handleOverlayClick}
             >
               {/* Text boxes */}
