@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
@@ -147,6 +147,46 @@ function hexToRgb(hex: string) {
 }
 
 /* ── Component ──────────────────────────────────────────── */
+
+interface TextEditorProps {
+  value: string
+  className?: string
+  style?: CSSProperties
+  onInput: (text: string) => void
+  onFocus?: () => void
+}
+
+/**
+ * Uncontrolled contentEditable.
+ *
+ * The text must NOT be rendered as React children: on every keystroke the
+ * state updates, React re-writes the DOM text and the caret jumps back to
+ * position 0, scrambling what the user types. The text is written to the
+ * DOM once on mount and re-synced only when `value` changes externally
+ * (undo/redo, IndexedDB state restore, font/style updates).
+ */
+function TextEditor({ value, className, style, onInput, onFocus }: TextEditorProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el && el.textContent !== value) {
+      el.textContent = value
+    }
+  }, [value])
+
+  return (
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className={className}
+      style={style}
+      onInput={e => onInput((e.target as HTMLDivElement).textContent || '')}
+      onFocus={onFocus}
+    />
+  )
+}
 
 export default function EditarPdf() {
   const [file, setFile] = useState<File | null>(null)
@@ -1139,9 +1179,12 @@ export default function EditarPdf() {
             </div>
           )}
 
-          {/* PDF + Overlay — always show PDF, overlay extracted text on top */}
+          {/* PDF + Overlay — canvas hidden when extracted text exists, white background shows editable text only */}
           <div className="relative inline-block rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-default)' }}>
-            <canvas ref={canvasRef} className="block" />
+            <canvas ref={canvasRef} className="block" style={currentExisting.length > 0 ? { opacity: 0, pointerEvents: 'none' } : undefined} />
+            {currentExisting.length > 0 && (
+              <div className="absolute inset-0" style={{ background: '#ffffff', zIndex: 0 }} />
+            )}
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0"
@@ -1207,9 +1250,8 @@ export default function EditarPdf() {
                     }}
                   />
                   {/* Editable text */}
-                  <div
-                    contentEditable
-                    suppressContentEditableWarning
+                  <TextEditor
+                    value={box.text}
                     className="min-w-[60px] min-h-[24px] px-2 py-1.5 outline-none whitespace-pre-wrap"
                     style={{
                       fontSize: box.fontSize,
@@ -1230,11 +1272,9 @@ export default function EditarPdf() {
                       boxShadow: selectedBox === box.id ? '0 0 8px rgba(125,211,252,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
-                    onInput={e => updateBoxText(box.id, (e.target as HTMLDivElement).textContent || '')}
+                    onInput={text => updateBoxText(box.id, text)}
                     onFocus={() => setSelectedBox(box.id)}
-                  >
-                    {box.text}
-                  </div>
+                  />
                 </div>
               ))}
 
@@ -1267,9 +1307,8 @@ export default function EditarPdf() {
                     </button>
                   </div>
                   {/* Editable text */}
-                  <div
-                    contentEditable
-                    suppressContentEditableWarning
+                  <TextEditor
+                    value={item.text}
                     className="min-w-[40px] min-h-[16px] px-1 py-0.5 outline-none whitespace-pre-wrap"
                     style={{
                       fontSize: item.fontSize * scale * 0.75,
@@ -1288,11 +1327,9 @@ export default function EditarPdf() {
                       boxShadow: selectedExisting === item.id ? '0 0 8px rgba(16,185,129,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
-                    onInput={e => updateExistingText(item.id, (e.target as HTMLDivElement).textContent || '')}
+                    onInput={text => updateExistingText(item.id, text)}
                     onFocus={() => setSelectedExisting(item.id)}
-                  >
-                    {item.text}
-                  </div>
+                  />
                   {item.edited && (
                     <span className="absolute -bottom-5 left-0 text-[8px] opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#10b981' }}>
                       editado
