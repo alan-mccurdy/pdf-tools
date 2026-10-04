@@ -433,6 +433,32 @@ export default function EditarPdf() {
     lastScaleRef.current = scale
   }, [scale])
 
+  // Auto-fit zoom on load (small screens only): fit page width to the viewport
+  // so the editor doesn't force a huge horizontal scroll on phones.
+  const fitFileKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!file) return
+    const key = `${file.name}:${file.size}`
+    if (fitFileKeyRef.current === key) return
+    fitFileKeyRef.current = key
+    if (window.innerWidth >= 768) return // desktop keeps the 150% default
+    let cancelled = false
+    const fit = async () => {
+      try {
+        const bytes = await file.arrayBuffer()
+        const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+        const page = await pdf.getPage(1)
+        const pageWidth = page.getViewport({ scale: 1 }).width
+        const available = Math.max(200, window.innerWidth - 56)
+        // Floor to a 0.05 step so the value matches the zoom slider
+        const target = Math.floor((available / pageWidth) * 20) / 20
+        if (!cancelled) setScale(Math.min(1.5, Math.max(0.25, target)))
+      } catch { /* keep default scale */ }
+    }
+    void fit()
+    return () => { cancelled = true }
+  }, [file])
+
   // Extract native AcroForm fields (widget annotations) for the current page
   useEffect(() => {
     if (!file) return
@@ -563,25 +589,73 @@ export default function EditarPdf() {
     })
   }, [file])
 
+  // Size the draw overlay to the main canvas and redraw strokes
+  const redrawDrawCanvas = useCallback(() => {
+    const canvas = drawCanvasRef.current
+    const main = canvasRef.current
+    if (!canvas || !main) return
+    canvas.width = main.width
+    canvas.height = main.height
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    const pageStrokes = strokes.filter(s => s.page === currentPage)
+    for (const stroke of pageStrokes) {
+      if (stroke.points.length < 2) continue
+      ctx.beginPath()
+      ctx.strokeStyle = stroke.color
+      ctx.lineWidth = stroke.size
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i].x, stroke.points[i].y)
+      }
+      ctx.stroke()
+    }
+  }, [strokes, currentPage])
+
+  useEffect(() => { redrawDrawCanvas() }, [redrawDrawCanvas, scale])
+
   // Render current PDF page
   useEffect(() => {
     if (!file) return
+    let cancelled = false
+    let renderTask: { cancel(): void } | null = null
     const render = async () => {
-      const bytes = await file.arrayBuffer()
-      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
-      setTotalPages(pdf.numPages)
-      const page = await pdf.getPage(currentPage + 1)
-      const viewport = page.getViewport({ scale })
-      const canvas = canvasRef.current
-      if (!canvas) return
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      const ctx = canvas.getContext('2d')!
-      await page.render({ canvasContext: ctx, viewport } as never).promise
+      try {
+        const bytes = await file.arrayBuffer()
+        const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+        if (cancelled) return
+        setTotalPages(pdf.numPages)
+        const page = await pdf.getPage(currentPage + 1)
+        if (cancelled) return
+        const viewport = page.getViewport({ scale })
+        const canvas = canvasRef.current
+        if (!canvas) return
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+        const ctx = canvas.getContext('2d')!
+        if (cancelled) return
+        const task = page.render({ canvasContext: ctx, viewport } as never) as unknown as { promise: Promise<void>; cancel(): void }
+        renderTask = task
+        await task.promise
+        if (!cancelled) {
+          // Re-sync the drawing overlay now that the main canvas has its final size
+          // (the draw effect runs synchronously and would otherwise keep the old size)
+          redrawDrawCanvas()
+        }
+      } catch (err) {
+        // Cancelling a render on rapid scale/page changes is expected
+        if (!cancelled) console.error('PDF render failed:', err)
+      }
     }
-    render()
-  }, [file, currentPage, scale])
-
+    void render()
+    return () => {
+      cancelled = true
+      renderTask?.cancel()
+    }
+  }, [file, currentPage, scale, redrawDrawCanvas])
   // Extract existing text items from PDF page with column/table/field detection
   useEffect(() => {
     if (!file) return
@@ -730,33 +804,6 @@ export default function EditarPdf() {
     }
     extract().catch(() => {})
   }, [file, currentPage, scale])
-
-  // Render draw strokes on canvas overlay
-  useEffect(() => {
-    const canvas = drawCanvasRef.current
-    if (!canvas) return
-    const parent = canvas.parentElement
-    if (!parent) return
-    canvas.width = parent.clientWidth
-    canvas.height = parent.clientHeight
-    const ctx = canvas.getContext('2d')!
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-    const pageStrokes = strokes.filter(s => s.page === currentPage)
-    for (const stroke of pageStrokes) {
-      if (stroke.points.length < 2) continue
-      ctx.beginPath()
-      ctx.strokeStyle = stroke.color
-      ctx.lineWidth = stroke.size
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
-      for (let i = 1; i < stroke.points.length; i++) {
-        ctx.lineTo(stroke.points[i].x, stroke.points[i].y)
-      }
-      ctx.stroke()
-    }
-  }, [strokes, currentPage, scale])
 
   // ── Undo/Redo ──────────────────────────────────────────
 
@@ -1448,7 +1495,7 @@ export default function EditarPdf() {
       {/* Zoom */}
       <div className="flex items-center gap-2">
         <input
-          type="range" min={0.5} max={3} step={0.1} value={scale}
+          type="range" min={0.25} max={3} step={0.05} value={scale}
           onChange={e => setScale(Number(e.target.value))}
           className="w-20 accent-sky-300"
         />
@@ -1552,8 +1599,8 @@ export default function EditarPdf() {
                   </div>
                   {/* Delete button */}
                   <button
-                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
-                    style={{ background: 'var(--danger)' }}
+                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
+                    style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                     onClick={e => { e.stopPropagation(); deleteBox(box.id) }}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1618,8 +1665,8 @@ export default function EditarPdf() {
                   style={{ left: item.x, top: item.y }}
                   onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
                 >
-                  {/* Drag handle + delete — show on hover only */}
-                  <div className="absolute -top-6 left-0 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Drag handle + delete — visible/clickable on hover only (never on touch) */}
+                  <div className="absolute -top-6 left-0 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto">
                     <div
                       className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
                       style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
@@ -1629,8 +1676,8 @@ export default function EditarPdf() {
                       </svg>
                     </div>
                     <button
-                      className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer"
-                      style={{ background: 'var(--danger)' }}
+                      className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                      style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                       onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1666,7 +1713,7 @@ export default function EditarPdf() {
                     onFocus={() => setSelectedExisting(item.id)}
                   />
                   {item.edited && (
-                    <span className="absolute -bottom-5 left-0 text-[8px] opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#10b981' }}>
+                    <span className="absolute -bottom-5 left-0 text-[8px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ color: '#10b981' }}>
                       editado
                     </span>
                   )}
@@ -1684,7 +1731,7 @@ export default function EditarPdf() {
                 >
                   {/* Drag handle */}
                   <div
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
                   >
@@ -1694,8 +1741,8 @@ export default function EditarPdf() {
                   </div>
                   {/* Delete */}
                   <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-8 min-h-8"
-                    style={{ background: 'var(--danger)' }}
+                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
+                    style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                     onClick={e => { e.stopPropagation(); deleteImage(img.id) }}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1757,6 +1804,10 @@ export default function EditarPdf() {
                       width: size,
                       height: size,
                       margin: 0,
+                      // Override the global 44px touch-target minimum: form
+                      // widgets must match their real position/size on the page
+                      minWidth: 0,
+                      minHeight: 0,
                       accentColor: '#0ea5e9',
                       pointerEvents: mode === 'draw' ? 'none' : 'auto',
                     }}
