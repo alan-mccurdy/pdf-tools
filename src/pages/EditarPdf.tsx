@@ -352,7 +352,7 @@ export default function EditarPdf() {
 
   // Undo/Redo
   const [history, setHistory] = useState<EditorState[]>([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [redoStack, setRedoStack] = useState<EditorState[]>([])
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -404,10 +404,22 @@ export default function EditarPdf() {
         items = items.map(it => ({ ...it, x: it.x * r, y: it.y * r, width: it.width * r, height: it.height * r }))
       }
       if (items.length) {
-        setExistingTexts(prev => [
-          ...prev.filter(t => !(t.page === pageNum && t.source === 'ocr')),
-          ...items,
-        ])
+        setExistingTexts(prev => {
+          // Preserve user-edited OCR items (e.g. restored from IndexedDB after a
+          // reload) — match them to the fresh extraction by proximity, and keep
+          // any that don't match so edits are never silently dropped.
+          const editedPrev = prev.filter(t => t.page === pageNum && t.source === 'ocr' && t.edited)
+          const merged = items.map(f => {
+            const m = editedPrev.find(e => Math.abs(e.x - f.x) <= 4 && Math.abs(e.y - f.y) <= 4 && Math.abs(e.width - f.width) <= 6)
+            return m ?? f
+          })
+          const unmatchedEdited = editedPrev.filter(e => !merged.includes(e))
+          return [
+            ...prev.filter(t => !(t.page === pageNum && t.source === 'ocr')),
+            ...merged,
+            ...unmatchedEdited,
+          ]
+        })
       }
       ocrDoneRef.current.add(key)
     } catch (err) {
@@ -808,37 +820,41 @@ export default function EditarPdf() {
   // ── Undo/Redo ──────────────────────────────────────────
 
   const pushHistory = useCallback(() => {
+    // Snapshot of the CURRENT (pre-action) state; new action clears redo future
     const state: EditorState = { boxes, images, strokes, existingTexts, formFields }
     setHistory(prev => {
-      const newHist = prev.slice(0, historyIndex + 1)
+      const newHist = prev.length >= 50 ? prev.slice(prev.length - 49) : [...prev]
       newHist.push(state)
-      if (newHist.length > 50) newHist.shift()
       return newHist
     })
-    setHistoryIndex(prev => Math.min(prev + 1, 49))
-  }, [boxes, images, strokes, existingTexts, formFields, historyIndex])
+    setRedoStack([])
+  }, [boxes, images, strokes, existingTexts, formFields])
 
   const undo = useCallback(() => {
-    if (historyIndex <= 0) return
-    const prev = history[historyIndex - 1]
+    if (history.length === 0) return
+    const current: EditorState = { boxes, images, strokes, existingTexts, formFields }
+    const prev = history[history.length - 1]
+    setRedoStack(s => (s.length >= 50 ? s.slice(s.length - 49) : [...s, current]))
     setBoxes(prev.boxes)
     setImages(prev.images)
     setStrokes(prev.strokes)
     if (prev.existingTexts) setExistingTexts(prev.existingTexts)
     if (prev.formFields) setFormFields(prev.formFields)
-    setHistoryIndex(i => i - 1)
-  }, [history, historyIndex])
+    setHistory(h => h.slice(0, -1))
+  }, [history, boxes, images, strokes, existingTexts, formFields])
 
   const redo = useCallback(() => {
-    if (historyIndex >= history.length - 1) return
-    const next = history[historyIndex + 1]
+    if (redoStack.length === 0) return
+    const current: EditorState = { boxes, images, strokes, existingTexts, formFields }
+    const next = redoStack[redoStack.length - 1]
+    setHistory(h => (h.length >= 50 ? h.slice(h.length - 49) : [...h, current]))
     setBoxes(next.boxes)
     setImages(next.images)
     setStrokes(next.strokes)
     if (next.existingTexts) setExistingTexts(next.existingTexts)
     if (next.formFields) setFormFields(next.formFields)
-    setHistoryIndex(i => i + 1)
-  }, [history, historyIndex])
+    setRedoStack(s => s.slice(0, -1))
+  }, [redoStack, boxes, images, strokes, existingTexts, formFields])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1090,10 +1106,13 @@ export default function EditarPdf() {
     if (!isDrawing.current) return
     isDrawing.current = false
     if (currentStroke.current.length >= 2) {
+      // Capture points BEFORE queueing: state updaters run deferred, after
+      // currentStroke.current is cleared below (would save an empty stroke)
+      const pts = [...currentStroke.current]
       pushHistory()
       setStrokes(prev => [...prev, {
         id: nextId.current++,
-        points: [...currentStroke.current],
+        points: pts,
         color: drawColor,
         size: drawSize,
         page: currentPage,
@@ -1479,12 +1498,12 @@ export default function EditarPdf() {
       <div className="spatial-toolbar-separator" />
 
       {/* Undo / Redo */}
-      <button className="spatial-btn-icon" onClick={undo} title="Deshacer (Ctrl+Z)" disabled={historyIndex <= 0}>
+      <button className="spatial-btn-icon" onClick={undo} title="Deshacer (Ctrl+Z)" disabled={history.length === 0}>
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
         </svg>
       </button>
-      <button className="spatial-btn-icon" onClick={redo} title="Rehacer (Ctrl+Y)" disabled={historyIndex >= history.length - 1}>
+      <button className="spatial-btn-icon" onClick={redo} title="Rehacer (Ctrl+Y)" disabled={redoStack.length === 0}>
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10H11a8 8 0 00-8 8v2m18-10l-6 6m6-6l-6-6" />
         </svg>
@@ -1634,7 +1653,7 @@ export default function EditarPdf() {
                       fontSize: box.fontSize,
                       fontFamily: box.fontFamily,
                       color: box.fontColor || '#1e293b',
-                      backgroundColor: box.highlightColor || 'rgba(244,247,255,0.4)',
+                      backgroundColor: box.highlightColor || 'rgba(244,247,255,0.22)',
                       fontWeight: box.bold ? 'bold' : 'normal',
                       fontStyle: box.italic ? 'italic' : 'normal',
                       textDecoration: box.underline ? 'underline' : 'none',
@@ -1645,7 +1664,7 @@ export default function EditarPdf() {
                         : '1.5px dashed #38bdf8',
                       borderRadius: '6px',
                       lineHeight: 1.4,
-                      backdropFilter: 'blur(6px)',
+                      backdropFilter: 'blur(2px)',
                       boxShadow: selectedBox === box.id ? '0 0 8px rgba(125,211,252,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
@@ -1693,7 +1712,7 @@ export default function EditarPdf() {
                       fontSize: item.fontSize * scale,
                       fontFamily: item.fontFamily,
                       color: active ? (item.edited ? (item.fontColor || '#0f172a') : '#0f172a') : 'transparent',
-                      backgroundColor: active ? '#ffffff' : 'transparent',
+                      backgroundColor: active ? 'rgba(255,255,255,0.75)' : 'transparent',
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
