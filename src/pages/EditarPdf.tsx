@@ -470,8 +470,9 @@ export default function EditarPdf() {
     }
   }
 
-  // OCR text items are stored in scaled overlay px — rescale them on zoom
-  // (they cannot be re-extracted cheaply like the text layer).
+  // OCR text items, boxes and images are stored in scaled overlay px —
+  // rescale them on zoom (OCR cannot be re-extracted cheaply; boxes/images
+  // would otherwise drift on screen AND export at the wrong coordinates).
   useEffect(() => {
     const prevScale = lastScaleRef.current
     if (prevScale !== null && prevScale > 0 && prevScale !== scale) {
@@ -481,6 +482,8 @@ export default function EditarPdf() {
           ? { ...t, x: t.x * r, y: t.y * r, width: t.width * r, height: t.height * r }
           : t,
       ))
+      setBoxes(prev => prev.map(b => ({ ...b, x: b.x * r, y: b.y * r, width: b.width * r })))
+      setImages(prev => prev.map(i => ({ ...i, x: i.x * r, y: i.y * r, width: i.width * r, height: i.height * r })))
     }
     lastScaleRef.current = scale
   }, [scale])
@@ -1298,23 +1301,41 @@ export default function EditarPdf() {
         })
       }
 
-      // Draw text boxes
+      // Draw text boxes — wrap like the preview (whitespace-pre-wrap at
+      // box.width) and honor alignment so the PDF matches what you see.
       for (const box of boxes) {
         if (!box.text.trim()) continue
         const page = pdfDoc.getPage(box.page)
         const { height } = page.getSize()
         const font = await getFont(box.fontFamily, box.bold, box.italic)
-        const lines = box.text.split('\n')
+        const boxW = Math.max(20, box.width / scale)
+        const measure = (t: string) => {
+          try { return font.widthOfTextAtSize(t, box.fontSize) } catch { return t.length * box.fontSize * 0.5 }
+        }
+        const lines: string[] = []
+        for (const para of box.text.split('\n')) {
+          const words = para.split(' ')
+          let cur = ''
+          for (const wd of words) {
+            const t = cur ? cur + ' ' + wd : wd
+            if (!cur || measure(t) <= boxW) cur = t
+            else { lines.push(cur); cur = wd }
+          }
+          lines.push(cur)
+        }
         let yOff = 0
         for (const line of lines) {
+          let x = box.x / scale
+          if (box.align === 'center') x += Math.max(0, (boxW - measure(line)) / 2)
+          else if (box.align === 'right') x += Math.max(0, boxW - measure(line))
           page.drawText(line, {
-            x: box.x / scale,
+            x,
             y: height - box.y / scale - box.fontSize - yOff,
             font,
             size: box.fontSize,
             color: hexToRgb(box.fontColor),
           })
-          yOff += box.fontSize * 1.3
+          yOff += box.fontSize * 1.4 // matches preview lineHeight
         }
       }
 
@@ -1713,7 +1734,9 @@ export default function EditarPdf() {
                     value={box.text}
                     className="min-w-[60px] min-h-[24px] px-2 py-1.5 outline-none whitespace-pre-wrap"
                     style={{
-                      fontSize: box.fontSize,
+                      // fontSize is stored in PDF points (same as export);
+                      // preview renders it at the current zoom scale
+                      fontSize: box.fontSize * scale,
                       fontFamily: box.fontFamily,
                       color: box.fontColor || '#1e293b',
                       backgroundColor: box.highlightColor || 'rgba(244,247,255,0.22)',
