@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import { PDFDocument, PDFName, PDFArray, PDFRef, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
@@ -1254,36 +1254,37 @@ export default function EditarPdf() {
       // also a page annotation, repoint /Fields at the page widgets so edits
       // hit what everyone renders. Normal PDFs (overlap > 0) are untouched.
       try {
-        const acroFormRef = pdfDoc.catalog.get(PDFName.of('AcroForm'))
-        if (acroFormRef) {
-          const acroForm = pdfDoc.context.lookup(acroFormRef)
-          const fieldsRef = acroForm.get(PDFName.of('Fields'))
-          const fields = fieldsRef ? pdfDoc.context.lookup(fieldsRef) : undefined
+        const acroForm = pdfDoc.catalog.AcroForm()
+        if (acroForm) {
+          const fieldsRaw = acroForm.get(PDFName.of('Fields'))
+          const fieldsObj = fieldsRaw ? pdfDoc.context.lookup(fieldsRaw) : undefined
+          const fields = fieldsObj instanceof PDFArray ? fieldsObj : undefined
           const pageAnnotRefs = new Set<string>()
           const pageWidgetRefs: PDFRef[] = []
           for (const page of pdfDoc.getPages()) {
-            const annotsRef = page.node.get(PDFName.of('Annots'))
-            if (!annotsRef) continue
-            const annots = pdfDoc.context.lookup(annotsRef)
-            if (!(annots instanceof PDFArray)) continue
-            for (let i = 0; i < annots.size(); i++) {
-              const ref = annots.get(i)
+            const annotsRaw = page.node.get(PDFName.of('Annots'))
+            const annotsObj = annotsRaw ? pdfDoc.context.lookup(annotsRaw) : undefined
+            if (!(annotsObj instanceof PDFArray)) continue
+            for (let i = 0; i < annotsObj.size(); i++) {
+              // pdf-lib's lookupMaybe(ref, PDFRef) resolves the ref first and
+              // then type-checks the TARGET (a PDFDict) — it throws. Use the
+              // raw entry + instanceof instead.
+              const ref = annotsObj.get(i)
+              if (!(ref instanceof PDFRef)) continue
               pageAnnotRefs.add(ref.toString())
               // only carry widget-style annots that carry a field name
               const dict = pdfDoc.context.lookup(ref)
-              if (dict && typeof dict.get === 'function' && dict.get(PDFName.of('T'))) {
-                pageWidgetRefs.push(ref)
-              }
+              if (dict instanceof PDFDict && dict.get(PDFName.of('T'))) pageWidgetRefs.push(ref)
             }
           }
-          if (fields instanceof PDFArray && pageAnnotRefs.size > 0) {
-            const hasOverlap = Array.from({ length: fields.size() }, (_, i) => fields.get(i).toString())
+          const hasOverlap = fields
+            ? Array.from({ length: fields.size() }, (_, i) => fields.get(i).toString())
               .some(r => pageAnnotRefs.has(r))
-            if (!hasOverlap && pageWidgetRefs.length > 0) {
-              const repaired = PDFArray.withContext(pdfDoc.context)
-              for (const ref of pageWidgetRefs) repaired.push(ref)
-              acroForm.set(PDFName.of('Fields'), repaired)
-            }
+            : false
+          if (fields && pageAnnotRefs.size > 0 && !hasOverlap && pageWidgetRefs.length > 0) {
+            const repaired = PDFArray.withContext(pdfDoc.context)
+            for (const ref of pageWidgetRefs) repaired.push(ref)
+            acroForm.set(PDFName.of('Fields'), repaired)
           }
         }
       } catch { /* not repairable — continue with pdf-lib's view of the form */ }
