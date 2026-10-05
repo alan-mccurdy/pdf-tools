@@ -342,6 +342,9 @@ export default function EditarPdf() {
   const [underline, setUnderline] = useState(false)
   const [align, setAlign] = useState<'left' | 'center' | 'right'>('left')
   const [mode, setMode] = useState<'text' | 'draw' | 'image'>('text')
+  // Show the rendered PDF page behind the extracted text. Default OFF: the page
+  // background hides the text/field overlays and makes the editor confusing.
+  const [showBackground, setShowBackground] = useState(false)
   const [drawColor, setDrawColor] = useState('#7dd3fc')
   const [drawSize, setDrawSize] = useState(2)
   const [showSaved, setShowSaved] = useState(false)
@@ -406,18 +409,47 @@ export default function EditarPdf() {
       if (items.length) {
         setExistingTexts(prev => {
           // Preserve user-edited OCR items (e.g. restored from IndexedDB after a
-          // reload) — match them to the fresh extraction by proximity, and keep
-          // any that don't match so edits are never silently dropped.
+          // reload). Match by normalized original text first (handles accents,
+          // punctuation drift and coords saved at another scale/units), then by
+          // position (same zoom). Adopt the fresh geometry so edits never end up
+          // misaligned. Unmatched edits with junk geometry (tiny rects saved at
+          // an old scale) or outside the page area are dropped.
+          const norm = (s: string) =>
+            (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')
           const editedPrev = prev.filter(t => t.page === pageNum && t.source === 'ocr' && t.edited)
+          const used = new Set<ExistingTextItem>()
           const merged = items.map(f => {
-            const m = editedPrev.find(e => Math.abs(e.x - f.x) <= 4 && Math.abs(e.y - f.y) <= 4 && Math.abs(e.width - f.width) <= 6)
-            return m ?? f
+            let m: ExistingTextItem | undefined
+            const fn = norm(f.originalText)
+            if (fn) {
+              const cands = editedPrev.filter(e => !used.has(e) && norm(e.originalText) === fn)
+              if (cands.length === 1) {
+                m = cands[0]
+              } else if (cands.length > 1) {
+                // Several edits share the text — nearest to the fresh box wins
+                m = cands.reduce((best, e) =>
+                  Math.hypot(e.x - f.x, e.y - f.y) < Math.hypot(best.x - f.x, best.y - f.y) ? e : best)
+              }
+            }
+            if (!m) {
+              m = editedPrev.find(e => !used.has(e) &&
+                Math.abs(e.x - f.x) <= 4 && Math.abs(e.y - f.y) <= 4 && Math.abs(e.width - f.width) <= 6)
+            }
+            if (m) {
+              used.add(m)
+              return { ...m, x: f.x, y: f.y, width: f.width, height: f.height, fontSize: f.fontSize }
+            }
+            return f
           })
-          const unmatchedEdited = editedPrev.filter(e => !merged.includes(e))
+          const unmatched = editedPrev.filter(e => !used.has(e))
+          const keepUnmatched = unmatched.filter(e =>
+            e.width >= 8 && e.height >= 4 &&
+            e.x >= -10 && e.y >= -10 && e.x <= viewport.width + 10 && e.y <= viewport.height + 10
+          )
           return [
             ...prev.filter(t => !(t.page === pageNum && t.source === 'ocr')),
             ...merged,
-            ...unmatchedEdited,
+            ...keepUnmatched,
           ]
         })
       }
@@ -1364,6 +1396,22 @@ export default function EditarPdf() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
           </svg>
         </button>
+        <button
+          className={`spatial-btn-icon ${showBackground ? 'active' : ''}`}
+          onClick={() => setShowBackground(v => !v)}
+          title={showBackground ? 'Ocultar fondo del PDF (ver solo texto)' : 'Ver fondo del PDF (imagen original)'}
+        >
+          {showBackground ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          )}
+        </button>
       </div>
 
       <div className="spatial-toolbar-separator" />
@@ -1551,7 +1599,7 @@ export default function EditarPdf() {
       description="Escribe y edita texto directamente sobre las paginas de tu PDF. Gratis y sin subir archivos a servidores."
       keyword="Editar PDF"
     >
-      <PDFUploader onFiles={f => f[0] && setFile(f[0])} />
+      {!file && <PDFUploader onFiles={f => f[0] && setFile(f[0])} />}
 
       {file && (
         <div className="mt-4">
@@ -1579,8 +1627,15 @@ export default function EditarPdf() {
           )}
 
           {/* PDF + Overlay — canvas stays visible; edited text is whiteed out locally */}
-          <div className="relative inline-block rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-default)' }}>
-            <canvas ref={canvasRef} className="block" />
+          <div
+            className="relative inline-block rounded-xl overflow-hidden"
+            style={{ border: '1px solid var(--border-default)', background: showBackground ? undefined : '#ffffff' }}
+          >
+            <canvas
+              ref={canvasRef}
+              className="block"
+              style={{ opacity: showBackground ? undefined : 0 }}
+            />
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0"
@@ -1601,7 +1656,7 @@ export default function EditarPdf() {
                 <div
                   key={box.id}
                   ref={el => { if (el) boxRefsMap.current.set(box.id, el); else boxRefsMap.current.delete(box.id) }}
-                  className={`editor-box absolute group cursor-pointer ${selectedBox === box.id ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-transparent' : ''}`}
+                  className={`editor-box absolute group cursor-pointer z-10 ${selectedBox === box.id ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-transparent' : ''}`}
                   style={{ left: box.x, top: box.y }}
                   onClick={e => { e.stopPropagation(); setSelectedBox(box.id); setSelectedImage(null) }}
                 >
@@ -1616,9 +1671,9 @@ export default function EditarPdf() {
                     </svg>
                     <span>texto</span>
                   </div>
-                  {/* Delete button */}
+                  {/* Delete button — visible on hover OR when selected (touch can't hover) */}
                   <button
-                    className="absolute -top-7 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
+                    className={`absolute -top-7 right-0 w-5 h-5 rounded-t transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 ${selectedBox === box.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
                     style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                     onClick={e => { e.stopPropagation(); deleteBox(box.id) }}
                   >
@@ -1684,8 +1739,8 @@ export default function EditarPdf() {
                   style={{ left: item.x, top: item.y }}
                   onClick={e => { e.stopPropagation(); setSelectedExisting(item.id); setSelectedBox(null); setSelectedImage(null) }}
                 >
-                  {/* Drag handle + delete — visible/clickable on hover only (never on touch) */}
-                  <div className="absolute -top-6 left-0 right-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto">
+                  {/* Drag handle + delete — hover on desktop, always visible when selected (touch) */}
+                  <div className={`absolute -top-6 left-0 right-0 flex items-center transition-opacity ${selectedExisting === item.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}>
                     <div
                       className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
                       style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
@@ -1711,8 +1766,10 @@ export default function EditarPdf() {
                     style={{
                       fontSize: item.fontSize * scale,
                       fontFamily: item.fontFamily,
-                      color: active ? (item.edited ? (item.fontColor || '#0f172a') : '#0f172a') : 'transparent',
-                      backgroundColor: active ? 'rgba(255,255,255,0.75)' : 'transparent',
+                      color: (!showBackground || active) ? (item.edited ? (item.fontColor || '#0f172a') : '#0f172a') : 'transparent',
+                      backgroundColor: showBackground
+                        ? (active ? 'rgba(255,255,255,0.75)' : 'transparent')
+                        : (active ? 'rgba(56,189,248,0.10)' : 'transparent'),
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
@@ -1721,7 +1778,7 @@ export default function EditarPdf() {
                       padding: 0,
                       border: active
                         ? (selectedExisting === item.id ? '2px solid #10b981' : '1.5px dashed rgba(16,185,129,0.6)')
-                        : '1.5px dashed transparent',
+                        : (showBackground ? '1.5px dashed transparent' : '1px dashed rgba(15,23,42,0.30)'),
                       borderRadius: '3px',
                       lineHeight: 1.3,
                       backdropFilter: 'none',
@@ -1748,9 +1805,9 @@ export default function EditarPdf() {
                   style={{ left: img.x, top: img.y }}
                   onClick={e => { e.stopPropagation(); setSelectedImage(img.id); setSelectedBox(null) }}
                 >
-                  {/* Drag handle */}
+                  {/* Drag handle — visible on hover OR when selected */}
                   <div
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
+                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
                   >
@@ -1758,9 +1815,9 @@ export default function EditarPdf() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
                     </svg>
                   </div>
-                  {/* Delete */}
+                  {/* Delete — visible on hover OR when selected */}
                   <button
-                    className="absolute -top-6 right-0 w-5 h-5 rounded-t opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto"
+                    className={`absolute -top-6 right-0 w-5 h-5 rounded-t transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
                     style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                     onClick={e => { e.stopPropagation(); deleteImage(img.id) }}
                   >
@@ -1789,15 +1846,15 @@ export default function EditarPdf() {
                       value={f.value}
                       onChange={e => updateFormField(f, { value: e.target.value })}
                       onClick={e => e.stopPropagation()}
-                      className="absolute focus:ring-1 focus:ring-sky-400 focus:bg-white/70"
+                      className="absolute focus:ring-1 focus:ring-sky-400"
                       style={{
                         ...pos,
                         fontSize: Math.max(9, f.height * 0.62),
                         lineHeight: `${f.height}px`,
                         fontFamily: 'Helvetica, Arial, sans-serif',
                         color: '#0f172a',
-                        background: 'transparent',
-                        border: 'none',
+                        background: showBackground ? 'transparent' : 'rgba(255,255,255,0.75)',
+                        border: showBackground ? 'none' : '1px dashed rgba(56,189,248,0.7)',
                         outline: 'none',
                         padding: '0 2px',
                         boxSizing: 'border-box',
