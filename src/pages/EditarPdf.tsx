@@ -239,6 +239,14 @@ function groupWordsToItems(
     }
     if (!text.trim()) continue
 
+    // Item-level sanity: mostly-symbol text (form graphics) or an item where
+    // most words are not confidently read is junk — drop it from the layer.
+    const compact = text.replace(/\s+/gu, '')
+    const alnum = text.match(/[\p{L}\p{N}]/gu)?.length ?? 0
+    if (!compact || alnum / compact.length < 0.5) continue
+    const highConf = g.words.filter(w => w.confidence >= 80).length / g.words.length
+    if (highConf <= 0.5) continue
+
     const inkTop = Math.min(...g.words.map(w => w.y0))
     const inkBottom = Math.max(...g.words.map(w => w.y1))
     const x0 = Math.min(...g.words.map(w => w.x0))
