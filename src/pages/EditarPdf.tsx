@@ -198,6 +198,21 @@ function resolveRealFont(page: unknown, loadedName: string): { family: string; b
 }
 
 /** Group OCR word boxes into per-line editable items (overlay coords at `scale`). */
+function median(nums: number[]): number {
+  const s = [...nums].sort((a, b) => a - b)
+  const m = s.length >> 1
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
+let measureCtx: CanvasRenderingContext2D | null | undefined
+/** Width of `text` rendered in Helvetica at `fontSizePx` (preview units). */
+function measureTextPx(text: string, fontSizePx: number): number {
+  if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d')
+  if (!measureCtx) return 0
+  measureCtx.font = `${fontSizePx}px Helvetica`
+  return measureCtx.measureText(text).width
+}
+
 function groupWordsToItems(
   words: OcrWordBox[],
   scale: number,
@@ -227,52 +242,83 @@ function groupWordsToItems(
   const items: ExistingTextItem[] = []
   for (const g of groups) {
     g.words.sort((a, b) => a.x0 - b.x0)
-    let text = ''
-    let prevEnd = 0
-    let maxH = 0
+
+    // Split the line into columns: table cells sit side by side with wide
+    // gaps, and merging them into one item painted a white box across
+    // neighbouring cells (the "original layout moves/disappears" bug).
+    const medHGroup = median(g.words.map(w => w.y1 - w.y0))
+    const cols: OcrWordBox[][] = [[]]
+    let lineEnd: number | null = null
     for (const w of g.words) {
-      const gap = w.x0 - prevEnd
-      // Insert a space when the horizontal gap between words is wider than a
-      // letter but narrower than a full word gap (~0.28em). 0.35 glued words
-      // like "ELQUELLAMA"; thresholds below ~0.10 start splitting letters.
-      if (text) text += gap > Math.max(1, maxH * 0.12) ? ' ' : ''
-      text += w.text
-      prevEnd = Math.max(prevEnd, w.x1)
-      maxH = Math.max(maxH, w.y1 - w.y0)
+      if (lineEnd !== null) {
+        const colWords = cols[cols.length - 1]
+        const textSoFar = colWords.map(c => c.text).join('')
+        const avgCharW = textSoFar.length ? (lineEnd - colWords[0].x0) / textSoFar.length : 10
+        if (w.x0 - lineEnd > Math.max(24, 2.2 * medHGroup, 3 * avgCharW)) cols.push([])
+      }
+      cols[cols.length - 1].push(w)
+      lineEnd = Math.max(lineEnd ?? 0, w.x1)
     }
-    if (!text.trim()) continue
 
-    // Item-level sanity: mostly-symbol text (form graphics) or an item where
-    // most words are not confidently read is junk — drop it from the layer.
-    const compact = text.replace(/\s+/gu, '')
-    const alnum = text.match(/[\p{L}\p{N}]/gu)?.length ?? 0
-    if (!compact || alnum / compact.length < 0.5) continue
-    const highConf = g.words.filter(w => w.confidence >= 80).length / g.words.length
-    if (highConf <= 0.5) continue
+    for (const col of cols) {
+      let text = ''
+      let prevEnd = 0
+      for (const w of col) {
+        const gap = w.x0 - prevEnd
+        // Insert a space when the horizontal gap between words is wider than a
+        // letter but narrower than a full word gap (~0.28em). 0.35 glued words
+        // like "ELQUELLAMA"; thresholds below ~0.10 start splitting letters.
+        // Gap is compared against THIS word's height: group maxH can be 2x
+        // inflated by outlier bboxes and glued words like TELÉFONOSDEMÉXICO.
+        if (text) text += gap > Math.max(1, (w.y1 - w.y0) * 0.12) ? ' ' : ''
+        text += w.text
+        prevEnd = Math.max(prevEnd, w.x1)
+      }
+      if (!text.trim()) continue
 
-    const inkTop = Math.min(...g.words.map(w => w.y0))
-    const inkBottom = Math.max(...g.words.map(w => w.y1))
-    const x0 = Math.min(...g.words.map(w => w.x0))
-    // Raw font size in PDF points (preview multiplies by scale, export uses raw)
-    const fontSize = (maxH * 1.05) / scale
-    const height = fontSize * scale * 1.3
-    items.push({
-      id: makeId(),
-      text,
-      originalText: text,
-      x: x0,
-      y: inkTop - (height - (inkBottom - inkTop)) / 2,
-      width: Math.max(prevEnd - x0, 10),
-      height,
-      fontSize,
-      fontFamily: 'Helvetica',
-      fontColor: '#000000',
-      bold: false,
-      italic: false,
-      page,
-      edited: false,
-      source: 'ocr',
-    })
+      // Item-level sanity: mostly-symbol text (form graphics) or an item where
+      // most words are not confidently read is junk — drop it from the layer.
+      const compact = text.replace(/\s+/gu, '')
+      const alnum = text.match(/[\p{L}\p{N}]/gu)?.length ?? 0
+      if (!compact || alnum / compact.length < 0.5) continue
+      const highConf = col.filter(w => w.confidence >= 80).length / col.length
+      if (highConf <= 0.5) continue
+
+      const inkTop = Math.min(...col.map(w => w.y0))
+      const inkBottom = Math.max(...col.map(w => w.y1))
+      const x0 = Math.min(...col.map(w => w.x0))
+      const boxW = Math.max(prevEnd - x0, 10)
+      // Font size from the MEDIAN word height: tesseract sometimes returns
+      // 1.5–2x inflated bboxes for a word (e.g. MAXCOM h=32 vs the real ~17),
+      // and max() turned that into giant text overflowing the cell.
+      const fontSizePx = median(col.map(w => w.y1 - w.y0)) * 1.05
+      // Fit-to-width: Helvetica renders wider than the scanned original;
+      // never exceed the OCR box or the item taps neighbouring cells.
+      const predicted = measureTextPx(text, fontSizePx)
+      const fittedPx = predicted > 0
+        ? fontSizePx * Math.min(1, Math.max(0.4, boxW / predicted))
+        : fontSizePx
+      // Raw font size in PDF points (preview multiplies by scale, export uses raw)
+      const fontSize = fittedPx / scale
+      const height = fittedPx * 1.3
+      items.push({
+        id: makeId(),
+        text,
+        originalText: text,
+        x: x0,
+        y: inkTop - (height - (inkBottom - inkTop)) / 2,
+        width: boxW,
+        height,
+        fontSize,
+        fontFamily: 'Helvetica',
+        fontColor: '#000000',
+        bold: false,
+        italic: false,
+        page,
+        edited: false,
+        source: 'ocr',
+      })
+    }
   }
   return items
 }
@@ -458,9 +504,16 @@ export default function EditarPdf() {
             e.width >= 8 && e.height >= 4 &&
             e.x >= -10 && e.y >= -10 && e.x <= viewport.width + 10 && e.y <= viewport.height + 10
           )
+          // Don't stack OCR duplicates on top of real text-layer items (the
+          // text layer wins: it is exact even when tesseract misreads it).
+          const textItems = prev.filter(t => t.page === pageNum && t.source === 'text')
+          const textNorms = new Set(textItems.map(t => norm(t.originalText)).filter(Boolean))
+          const dupOfText = (f: ExistingTextItem) =>
+            textNorms.has(norm(f.originalText)) ||
+            textItems.some(t => Math.abs(t.x - f.x) <= 8 && Math.abs(t.y - f.y) <= 8)
           return [
             ...prev.filter(t => !(t.page === pageNum && t.source === 'ocr')),
-            ...merged,
+            ...merged.filter(f => !dupOfText(f)),
             ...keepUnmatched,
           ]
         })
@@ -860,6 +913,10 @@ export default function EditarPdf() {
         const other = prev.filter(t => t.page !== currentPage || t.source === 'ocr')
         return [...other, ...newItems]
       })
+      // Sparse text layer: a re-opened edited export only carries the redrawn
+      // strokes as real text — without running OCR too, the scanned rest of
+      // the page would never get its editable layer back.
+      if (validItems.length < 10) void runOcr(currentPage, scale)
     }
     extract().catch(() => {})
   }, [file, currentPage, scale])
