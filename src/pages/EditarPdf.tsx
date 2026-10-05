@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFArray, PDFRef, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
@@ -232,7 +232,10 @@ function groupWordsToItems(
     let maxH = 0
     for (const w of g.words) {
       const gap = w.x0 - prevEnd
-      if (text) text += gap > maxH * 0.35 ? ' ' : ''
+      // Insert a space when the horizontal gap between words is wider than a
+      // letter but narrower than a full word gap (~0.28em). 0.35 glued words
+      // like "ELQUELLAMA"; thresholds below ~0.10 start splitting letters.
+      if (text) text += gap > Math.max(1, maxH * 0.12) ? ' ' : ''
       text += w.text
       prevEnd = Math.max(prevEnd, w.x1)
       maxH = Math.max(maxH, w.y1 - w.y0)
@@ -350,9 +353,10 @@ export default function EditarPdf() {
   const [underline, setUnderline] = useState(false)
   const [align, setAlign] = useState<'left' | 'center' | 'right'>('left')
   const [mode, setMode] = useState<'text' | 'draw' | 'image'>('text')
-  // Show the rendered PDF page behind the extracted text. Default OFF: the page
-  // background hides the text/field overlays and makes the editor confusing.
-  const [showBackground, setShowBackground] = useState(false)
+  // Show the rendered PDF page behind the extracted text.
+  // Default ON: replacement mode — design visible, OCR text in editable
+  // white patches on top of the original text. OFF = text-only view.
+  const [showBackground, setShowBackground] = useState(true)
   const [drawColor, setDrawColor] = useState('#7dd3fc')
   const [drawSize, setDrawSize] = useState(2)
   const [showSaved, setShowSaved] = useState(false)
@@ -1240,6 +1244,50 @@ export default function EditarPdf() {
     try {
       const bytes = await file.arrayBuffer()
       const pdfDoc = await PDFDocument.load(bytes)
+
+      // Some Apple-generated forms (e.g. Telmex's Formato_Telmex_editable)
+      // have a split brain: AcroForm /Fields points at ORPHAN copies of every
+      // widget (disjoint from the page), while the real rendered annotations
+      // live in page /Annots. pdf-lib only edits /Fields, so fills would land
+      // on invisible objects — viewers (Chrome/pdf.js/Acrobat) would show a
+      // blank white box after our white-out. Repair: if NO AcroForm field is
+      // also a page annotation, repoint /Fields at the page widgets so edits
+      // hit what everyone renders. Normal PDFs (overlap > 0) are untouched.
+      try {
+        const acroFormRef = pdfDoc.catalog.get(PDFName.of('AcroForm'))
+        if (acroFormRef) {
+          const acroForm = pdfDoc.context.lookup(acroFormRef)
+          const fieldsRef = acroForm.get(PDFName.of('Fields'))
+          const fields = fieldsRef ? pdfDoc.context.lookup(fieldsRef) : undefined
+          const pageAnnotRefs = new Set<string>()
+          const pageWidgetRefs: PDFRef[] = []
+          for (const page of pdfDoc.getPages()) {
+            const annotsRef = page.node.get(PDFName.of('Annots'))
+            if (!annotsRef) continue
+            const annots = pdfDoc.context.lookup(annotsRef)
+            if (!(annots instanceof PDFArray)) continue
+            for (let i = 0; i < annots.size(); i++) {
+              const ref = annots.get(i)
+              pageAnnotRefs.add(ref.toString())
+              // only carry widget-style annots that carry a field name
+              const dict = pdfDoc.context.lookup(ref)
+              if (dict && typeof dict.get === 'function' && dict.get(PDFName.of('T'))) {
+                pageWidgetRefs.push(ref)
+              }
+            }
+          }
+          if (fields instanceof PDFArray && pageAnnotRefs.size > 0) {
+            const hasOverlap = Array.from({ length: fields.size() }, (_, i) => fields.get(i).toString())
+              .some(r => pageAnnotRefs.has(r))
+            if (!hasOverlap && pageWidgetRefs.length > 0) {
+              const repaired = PDFArray.withContext(pdfDoc.context)
+              for (const ref of pageWidgetRefs) repaired.push(ref)
+              acroForm.set(PDFName.of('Fields'), repaired)
+            }
+          }
+        }
+      } catch { /* not repairable — continue with pdf-lib's view of the form */ }
+
       const fontCache: Record<string, PDFFont> = {}
 
       const getFont = async (name: string, isBold: boolean, isItalic: boolean) => {
@@ -1258,9 +1306,33 @@ export default function EditarPdf() {
         const form = pdfDoc.getForm()
         for (const f of formFields) {
           if (!f.touched) continue
+          // White-out the scan under the widget first (content streams render
+          // below annotation appearances, so the value drawn next stays clean
+          // instead of double-painting over baked-in sample text or cells).
+          try {
+            const wp = pdfDoc.getPage(f.page)
+            const { height: wh } = wp.getSize()
+            wp.drawRectangle({
+              x: f.x / scale,
+              y: wh - f.y / scale - f.height / scale,
+              width: f.width / scale,
+              height: f.height / scale,
+              color: rgb(1, 1, 1),
+              borderWidth: 0,
+            })
+          } catch { /* page missing — skip whiteout */ }
           try {
             if (f.type === 'Tx') {
-              form.getTextField(f.name).setText(f.value)
+              const tf = form.getTextField(f.name)
+              // The Telmex form caps fecha at 6 chars ("ddmmyy") — an editor
+              // must not silently drop longer real-world input ("05/10/2026").
+              try {
+                const ml = tf.getMaxLength()
+                if (f.value.length > 0 && (ml === null || ml === undefined || f.value.length > ml)) {
+                  tf.setMaxLength(f.value.length)
+                }
+              } catch { /* field without max-length support */ }
+              tf.setText(f.value)
             } else if (f.type === 'Btn') {
               const cb = form.getCheckBox(f.name)
               if (f.checked) cb.check()
@@ -1428,7 +1500,7 @@ export default function EditarPdf() {
         <button
           className={`spatial-btn-icon ${showBackground ? 'active' : ''}`}
           onClick={() => setShowBackground(v => !v)}
-          title={showBackground ? 'Ocultar fondo del PDF (ver solo texto)' : 'Ver fondo del PDF (imagen original)'}
+          title={showBackground ? 'Ver solo texto (ocultar el diseño)' : 'Ver diseño del PDF (modo reemplazo)'}
         >
           {showBackground ? (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1797,9 +1869,9 @@ export default function EditarPdf() {
                     style={{
                       fontSize: item.fontSize * scale,
                       fontFamily: item.fontFamily,
-                      color: (!showBackground || active) ? (item.edited ? (item.fontColor || '#0f172a') : '#0f172a') : 'transparent',
+                      color: item.edited ? (item.fontColor || '#0f172a') : '#0f172a',
                       backgroundColor: showBackground
-                        ? (active ? 'rgba(255,255,255,0.75)' : 'transparent')
+                        ? '#ffffff'
                         : (active ? 'rgba(56,189,248,0.10)' : 'transparent'),
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
@@ -1809,7 +1881,7 @@ export default function EditarPdf() {
                       padding: 0,
                       border: active
                         ? (selectedExisting === item.id ? '2px solid #10b981' : '1.5px dashed rgba(16,185,129,0.6)')
-                        : (showBackground ? '1.5px dashed transparent' : '1px dashed rgba(15,23,42,0.30)'),
+                        : (showBackground ? 'none' : '1px dashed rgba(15,23,42,0.30)'),
                       borderRadius: '3px',
                       lineHeight: 1.3,
                       backdropFilter: 'none',
@@ -1884,7 +1956,9 @@ export default function EditarPdf() {
                         lineHeight: `${f.height}px`,
                         fontFamily: 'Helvetica, Arial, sans-serif',
                         color: '#0f172a',
-                        background: showBackground ? 'transparent' : 'rgba(255,255,255,0.75)',
+                        background: showBackground
+                          ? (f.value ? '#ffffff' : 'transparent')
+                          : 'rgba(255,255,255,0.75)',
                         border: showBackground ? 'none' : '1px dashed rgba(56,189,248,0.7)',
                         outline: 'none',
                         padding: '0 2px',
