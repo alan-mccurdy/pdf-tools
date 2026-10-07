@@ -81,6 +81,21 @@ interface FormField {
   exportValue?: string // Radio: value exported when this option is selected
   page: number
   touched: boolean
+  /** Natural (never-moved) position — used to white-out the scan when the field is relocated */
+  origX?: number
+  origY?: number
+  /** Scale the coords above were extracted at (re-map offsets on zoom/page re-extract) */
+  extractScale?: number
+  /** User dragged the field away from its natural position */
+  moved?: boolean
+  /** User removed the field — hidden in preview, white-out + off-page widget in export */
+  hidden?: boolean
+  /** Text alignment from the annotation's /Q (default left when the PDF declares none) */
+  align?: 'left' | 'center' | 'right'
+  /** Telmex scan: printed oval this checkbox must sit on, in PDF coords
+   *  [x1, y1, x2, y2] (bottom-up). Set on page 0 of the 1187×1536 Telmex form
+   *  and used to snap both the preview overlay and the exported widget rect. */
+  ovalPdf?: [number, number, number, number]
 }
 
 interface EditorState {
@@ -89,6 +104,28 @@ interface EditorState {
   strokes: DrawStroke[]
   existingTexts?: ExistingTextItem[]
   formFields?: FormField[]
+}
+
+/* ── Telmex scan form (Formato_Telmex_editable.pdf) ─────── */
+
+// The scan prints checkbox ovals that do NOT line up with the AcroForm widget
+// rects (the widgets sit ~50pt above their ovals). These are the oval rects in
+// PDF coords [x1, y1, x2, y2] (bottom-up) on page 0 of the 1187×1536 form.
+const TELMEX_PAGE_VIEW: [number, number, number, number] = [0, 0, 1187, 1536]
+const TELMEX_OVAL_RECTS: Record<string, [number, number, number, number]> = {
+  persona_fisica: [447.5, 1209.5, 491.5, 1239.5],
+  persona_moral: [665.5, 1210.5, 709.5, 1240.5],
+  servicio_fijo: [950, 1056, 996, 1078],
+  movil_mpp: [595, 1025, 639, 1049],
+  movil_cpp: [950, 1023, 996, 1045],
+  numero_no_geografico: [950, 992, 996, 1014],
+  donador_axtel: [105, 852, 127, 872],
+  donador_maxcom: [105, 818, 127, 838],
+  donador_marcatel: [105, 782, 127, 802],
+  donador_alestra: [105, 748, 127, 768],
+  donador_otro: [105, 712, 127, 732],
+  receptor_telmex_local: [639, 852, 661, 872],
+  receptor_telmex_800_900: [639, 798, 661, 818],
 }
 
 /* ── IndexedDB persistence ──────────────────────────────── */
@@ -387,6 +424,7 @@ export default function EditarPdf() {
   const [existingTexts, setExistingTexts] = useState<ExistingTextItem[]>([])
   const [selectedExisting, setSelectedExisting] = useState<number | null>(null)
   const [formFields, setFormFields] = useState<FormField[]>([])
+  const [selectedField, setSelectedField] = useState<string | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
 
   // Toolbar state
@@ -423,6 +461,8 @@ export default function EditarPdf() {
   const currentStroke = useRef<{ x: number; y: number }[]>([])
   const dragRef = useRef<{ id: number; startX: number; startY: number; boxX: number; boxY: number } | null>(null)
   const imgDragRef = useRef<{ id: number; startX: number; startY: number; imgX: number; imgY: number } | null>(null)
+  const existingDragRef = useRef<{ id: number; startX: number; startY: number; itemX: number; itemY: number } | null>(null)
+  const fieldDragRef = useRef<{ key: string; startX: number; startY: number; fx: number; fy: number } | null>(null)
   const fileRef = useRef(file)
   fileRef.current = file
   const newBoxRef = useRef<number | null>(null)
@@ -591,10 +631,10 @@ export default function EditarPdf() {
           // rect is [x1,y1,x2,y2] in PDF coords — map both corners to viewport space
           const p1 = viewport.convertToViewportPoint(a.rect[0], a.rect[1]) as number[]
           const p2 = viewport.convertToViewportPoint(a.rect[2], a.rect[3]) as number[]
-          const x = Math.min(p1[0], p2[0])
-          const y = Math.min(p1[1], p2[1])
-          const w = Math.abs(p2[0] - p1[0])
-          const h = Math.abs(p2[1] - p1[1])
+          let x = Math.min(p1[0], p2[0])
+          let y = Math.min(p1[1], p2[1])
+          let w = Math.abs(p2[0] - p1[0])
+          let h = Math.abs(p2[1] - p1[1])
           if (w < 4 || h < 4) continue
 
           let type: FormField['type'] = 'Tx'
@@ -610,6 +650,27 @@ export default function EditarPdf() {
               checked = !!a.fieldValue && a.fieldValue !== 'Off'
             }
           }
+
+          // Telmex scan: checkboxes render ON the printed oval, not on the
+          // (misplaced) widget rect — snap overlay position and remember the
+          // oval so the export can move the widget onto it too.
+          let ovalPdf: FormField['ovalPdf']
+          if (
+            currentPage === 0 && type === 'Btn' &&
+            Math.abs(page.view[2] - TELMEX_PAGE_VIEW[2]) < 1 &&
+            Math.abs(page.view[3] - TELMEX_PAGE_VIEW[3]) < 1 &&
+            TELMEX_OVAL_RECTS[a.fieldName]
+          ) {
+            const oval = TELMEX_OVAL_RECTS[a.fieldName]
+            ovalPdf = oval
+            const q1 = viewport.convertToViewportPoint(oval[0], oval[1]) as number[]
+            const q2 = viewport.convertToViewportPoint(oval[2], oval[3]) as number[]
+            x = Math.min(q1[0], q2[0])
+            y = Math.min(q1[1], q2[1])
+            w = Math.abs(q2[0] - q1[0])
+            h = Math.abs(q2[1] - q1[1])
+          }
+
           fields.push({
             name: a.fieldName,
             type,
@@ -619,6 +680,12 @@ export default function EditarPdf() {
             exportValue,
             page: currentPage,
             touched: false,
+            origX: x,
+            origY: y,
+            extractScale: scale,
+            // /Q: 0=left, 1=center, 2=right — absent means left (PDF default)
+            align: a.q === 1 ? 'center' : a.q === 2 ? 'right' : 'left',
+            ovalPdf,
           })
         }
         if (cancelled) return
@@ -627,7 +694,23 @@ export default function EditarPdf() {
           // Preserve user edits when re-extracting (scale/page changes)
           ...fields.map(f => {
             const old = prev.find(o => o.page === f.page && o.name === f.name && o.type === f.type && o.exportValue === f.exportValue)
-            return old && old.touched ? { ...f, value: old.value, checked: old.checked, touched: true } : f
+            if (!old) return f
+            const merged: FormField = {
+              ...f,
+              ...(old.touched ? { value: old.value, checked: old.checked, touched: true } : {}),
+              ...(old.hidden ? { hidden: true } : {}),
+            }
+            if (old.moved) {
+              // Re-apply the drag offset relative to the new natural position,
+              // scaled for zoom so the visual displacement stays proportional.
+              const k = old.extractScale && scale ? scale / old.extractScale : 1
+              const offX = (old.x - (old.origX ?? old.x)) * k
+              const offY = (old.y - (old.origY ?? old.y)) * k
+              merged.x = f.x + offX
+              merged.y = f.y + offY
+              merged.moved = true
+            }
+            return merged
           }),
         ])
       } catch {
@@ -749,7 +832,10 @@ export default function EditarPdf() {
         canvas.height = viewport.height
         const ctx = canvas.getContext('2d')!
         if (cancelled) return
-        const task = page.render({ canvasContext: ctx, viewport } as never) as unknown as { promise: Promise<void>; cancel(): void }
+        // annotationMode 0 (DISABLE): hide the scan's native widget
+        // appearances — the overlay inputs below are the editor's UI, and
+        // pdf.js's default ENABLE would paint gray AP squares under them.
+        const task = page.render({ canvasContext: ctx, viewport, annotationMode: pdfjsLib.AnnotationMode.DISABLE } as never) as unknown as { promise: Promise<void>; cancel(): void }
         renderTask = task
         await task.promise
         if (!cancelled) {
@@ -992,6 +1078,7 @@ export default function EditarPdf() {
     if ((e.target as HTMLElement).closest('.editor-box')) return
     if ((e.target as HTMLElement).closest('.editor-image')) return
     if ((e.target as HTMLElement).closest('.existing-text')) return
+    setSelectedField(null)
     const rect = overlayRef.current!.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
@@ -1281,6 +1368,88 @@ export default function EditarPdf() {
     window.addEventListener('mouseup', handleUp)
   }, [images])
 
+  // ── Drag extracted text items (OCR/text-layer) ──────────
+  const handleExistingDragStart = useCallback((e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
+    const item = existingTexts.find(t => t.id === id)
+    if (!item) return
+    existingDragRef.current = { id, startX: e.clientX, startY: e.clientY, itemX: item.x, itemY: item.y }
+    setSelectedExisting(id)
+    setSelectedBox(null)
+    setSelectedImage(null)
+    setSelectedField(null)
+    let pushed = false
+    const handleMove = (ev: MouseEvent) => {
+      if (!existingDragRef.current) return
+      const dx = ev.clientX - existingDragRef.current.startX
+      const dy = ev.clientY - existingDragRef.current.startY
+      if (!pushed && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+        // Snapshot the pre-drag state once real movement starts (keeps a
+        // simple click from polluting the undo stack).
+        pushed = true
+        pushHistory()
+      }
+      if (!pushed) return
+      setExistingTexts(prev => prev.map(t =>
+        t.id === existingDragRef.current!.id
+          ? { ...t, x: existingDragRef.current!.itemX + dx, y: existingDragRef.current!.itemY + dy }
+          : t
+      ))
+    }
+    const handleUp = () => {
+      existingDragRef.current = null
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+  }, [existingTexts, pushHistory])
+
+  // ── Drag / hide native AcroForm fields ──────────────────
+  const fieldKey = useCallback((f: FormField) => `${f.page}|${f.name}|${f.type}|${f.exportValue || ''}`, [])
+
+  const handleFieldDragStart = useCallback((e: React.MouseEvent, f: FormField) => {
+    e.stopPropagation()
+    const key = fieldKey(f)
+    fieldDragRef.current = { key, startX: e.clientX, startY: e.clientY, fx: f.x, fy: f.y }
+    setSelectedField(key)
+    setSelectedBox(null)
+    setSelectedImage(null)
+    setSelectedExisting(null)
+    let pushed = false
+    const handleMove = (ev: MouseEvent) => {
+      if (!fieldDragRef.current) return
+      const dx = ev.clientX - fieldDragRef.current.startX
+      const dy = ev.clientY - fieldDragRef.current.startY
+      if (!pushed && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+        pushed = true
+        pushHistory()
+      }
+      if (!pushed) return
+      setFormFields(prev => prev.map(g =>
+        fieldKey(g) === fieldDragRef.current!.key
+          ? { ...g, x: fieldDragRef.current!.fx + dx, y: fieldDragRef.current!.fy + dy, moved: true }
+          : g
+      ))
+    }
+    const handleUp = () => {
+      fieldDragRef.current = null
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+  }, [pushHistory, fieldKey])
+
+  const hideFormField = useCallback((f: FormField) => {
+    pushHistory()
+    const key = fieldKey(f)
+    setFormFields(prev => prev.map(g =>
+      fieldKey(g) === key ? { ...g, hidden: true, touched: true } : g
+    ))
+    setSelectedField(null)
+  }, [pushHistory, fieldKey])
+
   // ── Apply formatting to selected box ───────────────────
 
   const applyToSelected = useCallback((updates: Partial<TextBox>) => {
@@ -1359,29 +1528,87 @@ export default function EditarPdf() {
         return fontCache[key]
       }
 
-      // Fill native AcroForm fields (only the ones the user touched)
-      if (formFields.some(f => f.touched)) {
+      // Fill native AcroForm fields (touched, moved, or hidden ones)
+      if (formFields.some(f => f.touched || f.moved || f.hidden)) {
         const form = pdfDoc.getForm()
         for (const f of formFields) {
+          if (!f.touched && !f.moved && !f.hidden) continue
+          const wp = pdfDoc.getPage(f.page)
+          const { height: wh } = wp.getSize()
+          // Overlay → PDF coords (y flipped from the page top)
+          const toPdfRect = (ox: number, oy: number) => ({
+            x: ox / scale,
+            y: wh - oy / scale - f.height / scale,
+            width: f.width / scale,
+            height: f.height / scale,
+          })
+          const getWidget = () => {
+            const fld = f.type === 'Tx'
+              ? form.getTextField(f.name)
+              : f.type === 'Btn'
+                ? form.getCheckBox(f.name)
+                : form.getRadioGroup(f.name)
+            return fld.acroField.getWidgets()[0]
+          }
+
+          // Hidden fields: white-out their current spot (and the natural one
+          // if the field was dragged), then move the widget off-page so it
+          // renders nowhere. pdf-lib's removeField() throws on this document
+          // ("Could not find page for PDFRef"), so off-page is the fallback.
+          if (f.hidden) {
+            try {
+              wp.drawRectangle({ ...toPdfRect(f.x, f.y), color: rgb(1, 1, 1), borderWidth: 0 })
+              if (f.moved && f.origX !== undefined && f.origY !== undefined) {
+                wp.drawRectangle({ ...toPdfRect(f.origX, f.origY), color: rgb(1, 1, 1), borderWidth: 0 })
+              }
+            } catch { /* page missing — skip whiteout */ }
+            try {
+              const w = getWidget()
+              const r = w.getRectangle()
+              w.setRectangle({ x: -9999, y: -9999, width: r.width, height: r.height })
+            } catch { /* field missing — nothing to hide */ }
+            continue
+          }
+
+          // Relocated fields: put the widget where the user dropped it.
+          if (f.moved) {
+            try { getWidget().setRectangle(toPdfRect(f.x, f.y)) } catch { /* keep original rect */ }
+            // Clear the natural spot when the scan had a baked-in value there.
+            if (f.touched && f.origX !== undefined && f.origY !== undefined && (f.origX !== f.x || f.origY !== f.y)) {
+              try { wp.drawRectangle({ ...toPdfRect(f.origX, f.origY), color: rgb(1, 1, 1), borderWidth: 0 }) } catch { /* skip */ }
+            }
+          }
+
+          // Telmex oval snap: park the widget on its printed oval so the check
+          // mark renders inside it (unless the user dragged it elsewhere, in
+          // which case f.moved below moves it to the drop point instead).
+          if (f.ovalPdf && !f.moved) {
+            try {
+              const [ox1, oy1, ox2, oy2] = f.ovalPdf
+              getWidget().setRectangle({ x: ox1, y: oy1, width: ox2 - ox1, height: oy2 - oy1 })
+            } catch { /* keep original rect */ }
+          }
+
           if (!f.touched) continue
+
           // White-out the scan under the widget first (content streams render
           // below annotation appearances, so the value drawn next stays clean
           // instead of double-painting over baked-in sample text or cells).
-          try {
-            const wp = pdfDoc.getPage(f.page)
-            const { height: wh } = wp.getSize()
-            wp.drawRectangle({
-              x: f.x / scale,
-              y: wh - f.y / scale - f.height / scale,
-              width: f.width / scale,
-              height: f.height / scale,
-              color: rgb(1, 1, 1),
-              borderWidth: 0,
-            })
-          } catch { /* page missing — skip whiteout */ }
+          // Checkboxes keep the printed oval visible instead: their widget now
+          // sits ON the oval, so a white patch here would erase the design.
+          if (f.type !== 'Btn') {
+            try {
+              wp.drawRectangle({ ...toPdfRect(f.x, f.y), color: rgb(1, 1, 1), borderWidth: 0 })
+            } catch { /* page missing — skip whiteout */ }
+          }
           try {
             if (f.type === 'Tx') {
               const tf = form.getTextField(f.name)
+              // Match the preview's alignment (annotation /Q when declared).
+              // TextAlignment is a numeric enum: 0=Left, 1=Center, 2=Right.
+              try {
+                tf.setAlignment(f.align === 'center' ? 1 : f.align === 'right' ? 2 : 0)
+              } catch { /* field without alignment support */ }
               // The Telmex form caps fecha at 6 chars ("ddmmyy") — an editor
               // must not silently drop longer real-world input ("05/10/2026").
               try {
@@ -1404,6 +1631,58 @@ export default function EditarPdf() {
           // Recompute widget appearances so filled values are visible everywhere
           await form.updateFieldAppearances()
         } catch { /* keep original appearances */ }
+      }
+
+      // Telmex scan: neutralize the checkbox appearances and disable
+      // NeedAppearances. With NeedAppearances=true, PDFium ignores APs and
+      // regenerates gray fallback squares (the "chueca" export); with it off
+      // it draws our APs — an empty Off (printed oval shows through) and a
+      // blue check for Yes. /Border and /MK are stripped so no viewer paints
+      // a fallback border box around the widget either.
+      const ovalBtns = formFields.filter(f => f.ovalPdf && f.type === 'Btn')
+      if (ovalBtns.length > 0) {
+        try {
+          const af = pdfDoc.catalog.AcroForm()
+          if (af) af.set(PDFName.of('NeedAppearances'), pdfDoc.context.obj(false))
+        } catch { /* no AcroForm — nothing to fix */ }
+        const form2 = pdfDoc.getForm()
+        const ctx = pdfDoc.context
+        for (const f of ovalBtns) {
+          try {
+            const cb = form2.getCheckBox(f.name)
+            const widget = cb.acroField.getWidgets()[0]
+            // When no edits touched the field loop above (untouched export),
+            // the widget still needs to move onto its printed oval.
+            if (!f.moved && f.ovalPdf) {
+              const [ox1, oy1, ox2, oy2] = f.ovalPdf
+              widget.setRectangle({ x: ox1, y: oy1, width: ox2 - ox1, height: oy2 - oy1 })
+            }
+            widget.dict.delete(PDFName.of('Border'))
+            widget.dict.delete(PDFName.of('MK'))
+            // Blue check (#0369a1) drawn inside a 22×22 appearance BBox,
+            // proportionally mapped to the widget rect by the viewer.
+            const mkStream = (content: string) => ctx.register(ctx.stream(content, {
+              Subtype: PDFName.of('Form'),
+              BBox: ctx.obj([0, 0, 22, 22]),
+              Resources: ctx.obj({}),
+            }))
+            const nDict = ctx.obj({}) as PDFDict
+            nDict.set(PDFName.of('Off'), mkStream('q Q'))
+            nDict.set(PDFName.of('Yes'), mkStream('q 0.012 0.412 0.631 RG 2.8 w 1 J 1 j 4.4 10.4 m 9.24 6 l 17.6 14.4 l S Q'))
+            let apDict: PDFDict
+            const ap = widget.dict.get(PDFName.of('AP'))
+            const apObj = ap ? pdfDoc.context.lookup(ap) : undefined
+            if (apObj instanceof PDFDict) {
+              apDict = apObj
+            } else {
+              apDict = ctx.obj({}) as PDFDict
+              widget.dict.set(PDFName.of('AP'), ctx.register(apDict))
+            }
+            apDict.set(PDFName.of('N'), ctx.register(nDict))
+            apDict.delete(PDFName.of('D'))
+            apDict.delete(PDFName.of('R'))
+          } catch { /* field name mismatch — keep its appearance */ }
+        }
       }
 
       // White-out and redraw edited existing text
@@ -1491,7 +1770,9 @@ export default function EditarPdf() {
         } catch { /* skip broken images */ }
       }
 
-      const newBytes = await pdfDoc.save()
+      // updateFieldAppearances already ran above; don't let save() regenerate
+      // (and overwrite) the neutralized checkbox APs.
+      const newBytes = await pdfDoc.save({ updateFieldAppearances: false })
       const blob = new Blob([new Uint8Array(newBytes)], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -1510,7 +1791,10 @@ export default function EditarPdf() {
   const currentImages = images.filter(i => i.page === currentPage)
   const currentExisting = existingTexts.filter(t => t.page === currentPage)
   const currentFormFields = formFields.filter(f => f.page === currentPage)
-  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0 || existingTexts.some(t => t.edited) || formFields.some(f => f.touched)
+  const hasChanges = boxes.some(b => b.text.trim()) || images.length > 0 || existingTexts.some(t => t.edited) || formFields.some(f => f.touched || f.moved || f.hidden)
+    // Telmex: even an untouched form must be exportable — downloading runs the
+    // oval-snap + AP neutralization that removes the gray fallback squares.
+    || formFields.some(f => f.ovalPdf)
 
   /* ── Toolbar ──────────────────────────────────────────── */
 
@@ -1905,6 +2189,7 @@ export default function EditarPdf() {
                     <div
                       className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
                       style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
+                      onMouseDown={e => handleExistingDragStart(e, item.id)}
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -1999,58 +2284,210 @@ export default function EditarPdf() {
               {/* Native AcroForm fields — real inputs positioned over the form */}
               {currentFormFields.map(f => {
                 const pos = { left: f.x, top: f.y, width: f.width, height: f.height }
+                const key = fieldKey(f)
+                const selected = selectedField === key
+                const chromeVisible = selected ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'
+                if (f.hidden) {
+                  // Hidden = the export whites out the scan's checkbox/field here;
+                  // mirror that in the preview so what you see matches the PDF.
+                  if (!showBackground) return null
+                  return (
+                    <div
+                      key={`ff-${f.page}-${f.name}-${f.type}-${f.exportValue || ''}-hidden`}
+                      className="absolute pointer-events-none"
+                      style={{ ...pos, background: '#ffffff' }}
+                    />
+                  )
+                }
                 if (f.type === 'Tx') {
                   return (
-                    <input
+                    <div
                       key={`ff-${f.page}-${f.name}-Tx`}
-                      type="text"
-                      value={f.value}
-                      onChange={e => updateFormField(f, { value: e.target.value })}
-                      onClick={e => e.stopPropagation()}
-                      className="absolute focus:ring-1 focus:ring-sky-400"
-                      style={{
-                        ...pos,
-                        fontSize: Math.max(9, f.height * 0.62),
-                        lineHeight: `${f.height}px`,
-                        fontFamily: 'Helvetica, Arial, sans-serif',
-                        color: '#0f172a',
-                        background: showBackground
-                          ? (f.value ? '#ffffff' : 'transparent')
-                          : 'rgba(255,255,255,0.75)',
-                        border: showBackground ? 'none' : '1px dashed rgba(56,189,248,0.7)',
-                        outline: 'none',
-                        padding: '0 2px',
-                        boxSizing: 'border-box',
-                        pointerEvents: mode === 'draw' ? 'none' : 'auto',
-                      }}
-                    />
+                      className="absolute group/field"
+                      style={pos}
+                      onClick={e => { e.stopPropagation(); setSelectedField(key) }}
+                    >
+                      {/* Drag handle + hide — hover on desktop, sticky when selected */}
+                      <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
+                        <div
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
+                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          onMouseDown={e => handleFieldDragStart(e, f)}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                          </svg>
+                        </div>
+                        <button
+                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                          style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          title="Ocultar campo"
+                          onClick={e => { e.stopPropagation(); hideFormField(f) }}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        aria-label={f.name}
+                        value={f.value}
+                        onChange={e => updateFormField(f, { value: e.target.value })}
+                        onClick={e => { e.stopPropagation(); setSelectedField(key) }}
+                        onFocus={e => {
+                          // First focus on a baked-in scan value selects it so
+                          // typing replaces the sample ("Ñ") instead of appending.
+                          if (!f.touched) e.target.select()
+                        }}
+                        className="absolute left-0 top-0 focus:ring-1 focus:ring-sky-400"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          fontSize: Math.max(9, f.height * 0.62),
+                          lineHeight: `${f.height}px`,
+                          fontFamily: 'Helvetica, Arial, sans-serif',
+                          color: '#0f172a',
+                          background: showBackground
+                            // touched-but-empty keeps the white patch: clearing a
+                            // baked-in scan value must actually cover it up
+                            ? (f.value || f.touched ? '#ffffff' : 'transparent')
+                            : 'rgba(255,255,255,0.75)',
+                          border: showBackground ? 'none' : '1px dashed rgba(56,189,248,0.7)',
+                          outline: 'none',
+                          padding: '0 2px',
+                          boxSizing: 'border-box',
+                          textAlign: f.align || 'left',
+                          pointerEvents: mode === 'draw' ? 'none' : 'auto',
+                        }}
+                      />
+                    </div>
                   )
                 }
                 // Btn (checkbox) and Radio — centered in the widget rect
                 const size = Math.min(Math.max(Math.min(f.width, f.height), 12), 24)
+                // Telmex: the overlay rect is the printed oval — render a
+                // circular toggle that sits on it instead of a native square.
+                if (f.type === 'Btn' && f.ovalPdf) {
+                  return (
+                    <div
+                      key={`ff-${f.page}-${f.name}-${f.type}-oval`}
+                      className="absolute group/field"
+                      style={pos}
+                      onClick={e => { e.stopPropagation(); setSelectedField(key) }}
+                    >
+                      <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
+                        <div
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
+                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          onMouseDown={e => handleFieldDragStart(e, f)}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                          </svg>
+                        </div>
+                        <button
+                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                          style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          title="Ocultar campo"
+                          onClick={e => { e.stopPropagation(); hideFormField(f) }}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={f.checked}
+                        aria-label={f.name}
+                        onClick={e => { e.stopPropagation(); toggleFormField(f, !f.checked) }}
+                        className="absolute left-0 top-0 flex items-center justify-center cursor-pointer"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          margin: 0,
+                          padding: 0,
+                          minWidth: 0,
+                          minHeight: 0,
+                          appearance: 'none',
+                          WebkitAppearance: 'none',
+                          borderRadius: '50%',
+                          background: f.checked ? 'rgba(3,105,161,0.12)' : 'transparent',
+                          border: `2px solid ${f.checked ? '#0369a1' : 'rgba(148,163,184,0.75)'}`,
+                          outline: 'none',
+                          pointerEvents: mode === 'draw' ? 'none' : 'auto',
+                        }}
+                      >
+                        {f.checked && (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="pointer-events-none select-none"
+                            style={{ width: '72%', height: '72%' }}
+                            fill="none"
+                            stroke="#0369a1"
+                            strokeWidth={3.2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M4.5 12.5l5 5 10-10" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  )
+                }
                 return (
-                  <input
+                  <div
                     key={`ff-${f.page}-${f.name}-${f.type}-${f.exportValue || ''}`}
-                    type={f.type === 'Radio' ? 'radio' : 'checkbox'}
-                    name={`ff-${f.page}-${f.name}`}
-                    checked={f.checked}
-                    onChange={e => toggleFormField(f, e.target.checked)}
-                    onClick={e => e.stopPropagation()}
-                    className="absolute cursor-pointer"
-                    style={{
-                      left: f.x + (f.width - size) / 2,
-                      top: f.y + (f.height - size) / 2,
-                      width: size,
-                      height: size,
-                      margin: 0,
-                      // Override the global 44px touch-target minimum: form
-                      // widgets must match their real position/size on the page
-                      minWidth: 0,
-                      minHeight: 0,
-                      accentColor: '#0ea5e9',
-                      pointerEvents: mode === 'draw' ? 'none' : 'auto',
-                    }}
-                  />
+                    className="absolute group/field"
+                    style={pos}
+                    onClick={e => { e.stopPropagation(); setSelectedField(key) }}
+                  >
+                    <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
+                      <div
+                        className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
+                        style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                        onMouseDown={e => handleFieldDragStart(e, f)}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                        </svg>
+                      </div>
+                      <button
+                        className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                        style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                        title="Ocultar campo"
+                        onClick={e => { e.stopPropagation(); hideFormField(f) }}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    <input
+                      type={f.type === 'Radio' ? 'radio' : 'checkbox'}
+                      name={`ff-${f.page}-${f.name}`}
+                      checked={f.checked}
+                      onChange={e => toggleFormField(f, e.target.checked)}
+                      onClick={e => e.stopPropagation()}
+                      className="absolute cursor-pointer"
+                      style={{
+                        left: (f.width - size) / 2,
+                        top: (f.height - size) / 2,
+                        width: size,
+                        height: size,
+                        margin: 0,
+                        // Override the global 44px touch-target minimum: form
+                        // widgets must match their real position/size on the page
+                        minWidth: 0,
+                        minHeight: 0,
+                        accentColor: '#0ea5e9',
+                        pointerEvents: mode === 'draw' ? 'none' : 'auto',
+                      }}
+                    />
+                  </div>
                 )
               })}
             </div>
