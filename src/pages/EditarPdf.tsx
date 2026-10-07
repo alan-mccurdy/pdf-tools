@@ -643,10 +643,19 @@ export default function EditarPdf() {
           if (a.fieldType === 'Btn') {
             if (a.radioButton) {
               type = 'Radio'
-              exportValue = typeof a.exportValue === 'string' ? a.exportValue : undefined
-              checked = !!a.fieldValue && a.fieldValue === exportValue
+              // pdf.js exposes the per-option export value as /buttonValue
+              // (a.fieldValue is the group's CURRENT value) — using the
+              // wrong one leaves every option unchecked and collapses the
+              // React keys into duplicates.
+              exportValue = typeof a.exportValue === 'string' && a.exportValue
+                ? a.exportValue
+                : typeof a.buttonValue === 'string' && a.buttonValue
+                  ? a.buttonValue
+                  : undefined
+              checked = !!a.fieldValue && !!exportValue && a.fieldValue === exportValue
             } else {
               type = 'Btn'
+              // Non-'Off' covers every checkbox on-state (/Yes, /On, /1, …)
               checked = !!a.fieldValue && a.fieldValue !== 'Off'
             }
           }
@@ -1471,22 +1480,22 @@ export default function EditarPdf() {
       const bytes = await file.arrayBuffer()
       const pdfDoc = await PDFDocument.load(bytes)
 
-      // Some Apple-generated forms (e.g. Telmex's Formato_Telmex_editable)
-      // have a split brain: AcroForm /Fields points at ORPHAN copies of every
-      // widget (disjoint from the page), while the real rendered annotations
-      // live in page /Annots. pdf-lib only edits /Fields, so fills would land
-      // on invisible objects — viewers (Chrome/pdf.js/Acrobat) would show a
-      // blank white box after our white-out. Repair: if NO AcroForm field is
-      // also a page annotation, repoint /Fields at the page widgets so edits
-      // hit what everyone renders. Normal PDFs (overlap > 0) are untouched.
+      // AcroForm /Fields can drift from the real rendered widgets in page
+      // /Annots: Apple-generated forms (e.g. Telmex's Formato_Telmex_editable)
+      // point /Fields at orphan COPIES while viewers render /Annots, so
+      // pdf-lib edits would land on invisible objects. Reconcile per field
+      // name: an orphaned duplicate widget dict in /Fields (carries /Subtype
+      // + /Rect) is replaced by the page's real widget; structured parents
+      // (/Kids, no widget subtype) and already-shared refs are kept, and page
+      // widgets missing from /Fields are appended. Healthy PDFs resolve to
+      // the exact same refs (no-op).
       try {
         const acroForm = pdfDoc.catalog.AcroForm()
         if (acroForm) {
           const fieldsRaw = acroForm.get(PDFName.of('Fields'))
           const fieldsObj = fieldsRaw ? pdfDoc.context.lookup(fieldsRaw) : undefined
           const fields = fieldsObj instanceof PDFArray ? fieldsObj : undefined
-          const pageAnnotRefs = new Set<string>()
-          const pageWidgetRefs: PDFRef[] = []
+          const pageWidgetByName = new Map<string, PDFRef>()
           for (const page of pdfDoc.getPages()) {
             const annotsRaw = page.node.get(PDFName.of('Annots'))
             const annotsObj = annotsRaw ? pdfDoc.context.lookup(annotsRaw) : undefined
@@ -1497,20 +1506,44 @@ export default function EditarPdf() {
               // raw entry + instanceof instead.
               const ref = annotsObj.get(i)
               if (!(ref instanceof PDFRef)) continue
-              pageAnnotRefs.add(ref.toString())
-              // only carry widget-style annots that carry a field name
               const dict = pdfDoc.context.lookup(ref)
-              if (dict instanceof PDFDict && dict.get(PDFName.of('T'))) pageWidgetRefs.push(ref)
+              if (!(dict instanceof PDFDict)) continue
+              const t = dict.get(PDFName.of('T'))
+              const name = t ? String(t) : ''
+              if (name && !pageWidgetByName.has(name)) pageWidgetByName.set(name, ref)
             }
           }
-          const hasOverlap = fields
-            ? Array.from({ length: fields.size() }, (_, i) => fields.get(i).toString())
-              .some(r => pageAnnotRefs.has(r))
-            : false
-          if (fields && pageAnnotRefs.size > 0 && !hasOverlap && pageWidgetRefs.length > 0) {
+          if (fields && pageWidgetByName.size > 0) {
+            const seenNames = new Set<string>()
             const repaired = PDFArray.withContext(pdfDoc.context)
-            for (const ref of pageWidgetRefs) repaired.push(ref)
-            acroForm.set(PDFName.of('Fields'), repaired)
+            let changed = false
+            for (let i = 0; i < fields.size(); i++) {
+              const ref = fields.get(i)
+              if (!(ref instanceof PDFRef)) {
+                repaired.push(ref)
+                continue
+              }
+              const dict = pdfDoc.context.lookup(ref)
+              const t = dict instanceof PDFDict ? dict.get(PDFName.of('T')) : undefined
+              const name = t ? String(t) : ''
+              if (name) seenNames.add(name)
+              const pageRef = name ? pageWidgetByName.get(name) : undefined
+              const isDuplicateWidget = dict instanceof PDFDict &&
+                !!dict.get(PDFName.of('Subtype')) && !!dict.get(PDFName.of('Rect'))
+              if (pageRef && isDuplicateWidget && pageRef.toString() !== ref.toString()) {
+                repaired.push(pageRef) // orphan copy → the widget everyone renders
+                changed = true
+              } else {
+                repaired.push(ref) // shared ref or structured parent — keep
+              }
+            }
+            for (const [name, ref] of pageWidgetByName) {
+              if (!seenNames.has(name)) {
+                repaired.push(ref) // widget never registered in /Fields
+                changed = true
+              }
+            }
+            if (changed) acroForm.set(PDFName.of('Fields'), repaired)
           }
         }
       } catch { /* not repairable — continue with pdf-lib's view of the form */ }
@@ -1659,6 +1692,26 @@ export default function EditarPdf() {
             }
             widget.dict.delete(PDFName.of('Border'))
             widget.dict.delete(PDFName.of('MK'))
+            // Resolve the existing AP first: it feeds the on-state detection
+            // below and is reused (or created) to hold the rebuilt /N.
+            const ap = widget.dict.get(PDFName.of('AP'))
+            const apObj = ap ? pdfDoc.context.lookup(ap) : undefined
+            // On-state name: checkboxes export /On, /1, /True… not only /Yes.
+            // Prefer the widget's current /AS, then the old AP's non-Off key,
+            // so the rebuilt AP always matches what /AS (and /V) point at.
+            let onState = 'Yes'
+            const asObj = widget.dict.get(PDFName.of('AS'))
+            if (asObj instanceof PDFName && asObj.toString() !== '/Off') {
+              onState = asObj.toString().replace(/^\//, '')
+            } else if (apObj instanceof PDFDict) {
+              const prevN = apObj.get(PDFName.of('N'))
+              const prevNObj = prevN ? pdfDoc.context.lookup(prevN) : undefined
+              if (prevNObj instanceof PDFDict) {
+                for (const k of prevNObj.keys()) {
+                  if (k.toString() !== '/Off') { onState = k.toString().replace(/^\//, ''); break }
+                }
+              }
+            }
             // Blue check (#0369a1) drawn inside a 22×22 appearance BBox,
             // proportionally mapped to the widget rect by the viewer.
             const mkStream = (content: string) => ctx.register(ctx.stream(content, {
@@ -1668,10 +1721,8 @@ export default function EditarPdf() {
             }))
             const nDict = ctx.obj({}) as PDFDict
             nDict.set(PDFName.of('Off'), mkStream('q Q'))
-            nDict.set(PDFName.of('Yes'), mkStream('q 0.012 0.412 0.631 RG 2.8 w 1 J 1 j 4.4 10.4 m 9.24 6 l 17.6 14.4 l S Q'))
+            nDict.set(PDFName.of(onState), mkStream('q 0.012 0.412 0.631 RG 2.8 w 1 J 1 j 4.4 10.4 m 9.24 6 l 17.6 14.4 l S Q'))
             let apDict: PDFDict
-            const ap = widget.dict.get(PDFName.of('AP'))
-            const apObj = ap ? pdfDoc.context.lookup(ap) : undefined
             if (apObj instanceof PDFDict) {
               apDict = apObj
             } else {
@@ -2403,7 +2454,7 @@ export default function EditarPdf() {
                         aria-checked={f.checked}
                         aria-label={f.name}
                         onClick={e => { e.stopPropagation(); toggleFormField(f, !f.checked) }}
-                        className="absolute left-0 top-0 flex items-center justify-center cursor-pointer"
+                        className="absolute left-0 top-0 flex items-center justify-center cursor-pointer transition hover:ring-2 hover:ring-sky-400/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 active:scale-[0.92]"
                         style={{
                           width: '100%',
                           height: '100%',
