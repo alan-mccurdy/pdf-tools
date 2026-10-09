@@ -50,7 +50,7 @@ export interface OcrWordBox {
   y1: number
   /** Tesseract confidence 0–100 for this word. */
   confidence: number
-  /** Average confidence 0–100 of the tesseract line this word belongs to. */
+  /** Average confidence 0–100 of the surviving words in this word's line. */
   lineConfidence: number
 }
 
@@ -59,9 +59,11 @@ export interface OcrWordBox {
  * Image coordinates are pixel-based, top-left origin, matching canvas coords.
  *
  * Words that are pure form-line artifacts (pipes/underscores/brackets drawn
- * as graphics), low-confidence scraps, or that belong to a line tesseract
- * read poorly are filtered out — they only add noise to the editor's layer.
- * Real text on scanned forms measures 84–97 confidence; junk measures <55.
+ * as graphics) or low-confidence scraps are filtered out — they only add
+ * noise to the editor's layer. Real text on scanned forms measures 84–97
+ * confidence; junk measures <55. Line quality is judged from the SURVIVING
+ * words' average, never tesseract's raw line.confidence: graphic scraps
+ * sharing the line report conf 0 and would drag real text down with them.
  */
 export async function extractWordsFromImage(image: HTMLCanvasElement): Promise<OcrWordBox[]> {
   const worker = await initOCR()
@@ -73,15 +75,25 @@ export async function extractWordsFromImage(image: HTMLCanvasElement): Promise<O
     for (const block of result.data.blocks || []) {
       for (const para of block.paragraphs || []) {
         for (const line of para.lines || []) {
-          const lineConfidence = typeof line.confidence === 'number' ? line.confidence : 100
-          for (const w of line.words || []) {
-            if (!w.text || !w.text.trim()) continue
-            // 1) no letters/numbers at all → drawn lines, boxes, pipes, underscores
-            if (!/[\p{L}\p{N}]/u.test(w.text)) continue
-            // 2) clearly misread word
-            if ((typeof w.confidence === 'number' ? w.confidence : 0) < 55) continue
-            // 3) whole line read poorly (form graphics rows, garbage rows)
-            if (lineConfidence < 65) continue
+          // 1) keep words with letters/numbers (drop drawn lines, boxes,
+          //    pipes, underscores) and confidence >= 55 (misread scraps)
+          const survivors = (line.words || []).filter(
+            w => !!w.text && !!w.text.trim() &&
+              /[\p{L}\p{N}]/u.test(w.text) &&
+              (typeof w.confidence === 'number' ? w.confidence : 0) >= 55,
+          )
+          if (!survivors.length) continue
+          // 2) whole line read poorly (form graphics rows, garbage rows).
+          //    Average the SURVIVING words: tesseract's raw line.confidence
+          //    is dragged under the threshold by conf-0 graphic scraps that
+          //    share the line — e.g. "NOMBRE DEL SUSCRIPTOR:" (96/95/67)
+          //    read as line conf 31 and was discarded whole, leaving the
+          //    printed words as bare pixels with no editable overlay.
+          const lineConfidence = Math.round(
+            survivors.reduce((s, w) => s + (typeof w.confidence === 'number' ? w.confidence : 0), 0) / survivors.length,
+          )
+          if (lineConfidence < 65) continue
+          for (const w of survivors) {
             words.push({
               text: w.text,
               x0: w.bbox.x0,

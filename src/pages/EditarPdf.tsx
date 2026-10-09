@@ -426,6 +426,11 @@ export default function EditarPdf() {
   const [formFields, setFormFields] = useState<FormField[]>([])
   const [selectedField, setSelectedField] = useState<string | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
+  // File whose persisted state has finished loading. The extraction/save
+  // effects are gated on identity (hydratedFile === file): without that
+  // gate their async completions race loadState's restore and the last
+  // writer wins, so element positions flip between uploads of the same PDF.
+  const [hydratedFile, setHydratedFile] = useState<File | null>(null)
 
   // Toolbar state
   const [fontSize, setFontSize] = useState(14)
@@ -495,7 +500,13 @@ export default function EditarPdf() {
       off.height = Math.ceil(viewport.height)
       const ctx = off.getContext('2d')
       if (!ctx) return
-      await page.render({ canvasContext: ctx, viewport } as never).promise
+      // annotationMode DISABLE: widget appearances must NOT reach the OCR
+      // image. ENABLE (the default) paints gray AP boxes over the scan —
+      // they cover word prefixes ("NOMB" of "NOMBRE"), tesseract can't read
+      // them, and the overlay item starts mid-word, leaving the covered
+      // prefix as bare image pixels. The main canvas already renders with
+      // DISABLE (see the render effect below) — OCR must see the same pixels.
+      await page.render({ canvasContext: ctx, viewport, annotationMode: pdfjsLib.AnnotationMode.DISABLE } as never).promise
       const words = await extractWordsFromImage(off)
       let items = groupWordsToItems(words, sc, pageNum, () => nextId.current++)
       // If the user zoomed while OCR was running, map coords to the current scale
@@ -614,6 +625,7 @@ export default function EditarPdf() {
   // Extract native AcroForm fields (widget annotations) for the current page
   useEffect(() => {
     if (!file) return
+    if (hydratedFile !== file) return // merge over the restored fields, not before them
     let cancelled = false
     const load = async () => {
       try {
@@ -728,7 +740,7 @@ export default function EditarPdf() {
     }
     load()
     return () => { cancelled = true }
-  }, [file, currentPage, scale])
+  }, [file, currentPage, scale, hydratedFile])
 
   // Auto-focus newly created text box
   useEffect(() => {
@@ -762,24 +774,29 @@ export default function EditarPdf() {
   // Save state on change (debounced)
   useEffect(() => {
     if (!file) return
+    if (hydratedFile !== file) return // never write before the restore lands
     const timer = setTimeout(() => {
       saveState(file.name, { boxes, images, strokes, existingTexts, formFields })
       setShowSaved(true)
       setTimeout(() => setShowSaved(false), 1500)
     }, 500)
     return () => clearTimeout(timer)
-  }, [boxes, images, strokes, existingTexts, formFields, file])
+  }, [boxes, images, strokes, existingTexts, formFields, file, hydratedFile])
 
-  // Load persisted state when file changes
+  // Load persisted state when file changes. hydratedFile is set only after
+  // this restore settles — the save/extraction effects wait for it, so the
+  // restore can never be clobbered (or clobber fresh extractions) mid-race.
   useEffect(() => {
     if (!file) return
-    loadState(file.name).then((saved) => {
+    let cancelled = false
+    const applySaved = (saved: Awaited<ReturnType<typeof loadState>>) => {
+      if (cancelled) return
       if (saved) {
         setBoxes(saved.boxes || [])
         setImages(saved.images || [])
         setStrokes(saved.strokes || [])
-        if (saved.existingTexts) setExistingTexts(saved.existingTexts)
-        if (saved.formFields) setFormFields(saved.formFields)
+        setExistingTexts(saved.existingTexts || [])
+        setFormFields(saved.formFields || [])
         // Update nextId
         const maxId = Math.max(
           ...saved.boxes.map(b => b.id),
@@ -789,8 +806,22 @@ export default function EditarPdf() {
           0,
         )
         nextId.current = maxId + 1
+      } else {
+        // Never-saved file: clear leftovers from the previous file so they
+        // can't bleed into this one (positions would look randomly shifted).
+        setBoxes([])
+        setImages([])
+        setStrokes([])
+        setExistingTexts([])
+        setFormFields([])
+        nextId.current = 1
       }
-    })
+    }
+    loadState(file.name)
+      .then(saved => applySaved(saved))
+      .catch(() => applySaved(null))
+      .finally(() => { if (!cancelled) setHydratedFile(file) })
+    return () => { cancelled = true }
   }, [file])
 
   // Size the draw overlay to the main canvas and redraw strokes
@@ -866,6 +897,7 @@ export default function EditarPdf() {
   // Extract existing text items from PDF page with column/table/field detection
   useEffect(() => {
     if (!file) return
+    if (hydratedFile !== file) return // restored items must be in the closure first (S2)
     const extract = async () => {
       const bytes = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
@@ -1014,7 +1046,7 @@ export default function EditarPdf() {
       if (validItems.length < 10) void runOcr(currentPage, scale)
     }
     extract().catch(() => {})
-  }, [file, currentPage, scale])
+  }, [file, currentPage, scale, hydratedFile])
 
   // ── Undo/Redo ──────────────────────────────────────────
 
@@ -1589,12 +1621,19 @@ export default function EditarPdf() {
           // renders nowhere. pdf-lib's removeField() throws on this document
           // ("Could not find page for PDFRef"), so off-page is the fallback.
           if (f.hidden) {
-            try {
-              wp.drawRectangle({ ...toPdfRect(f.x, f.y), color: rgb(1, 1, 1), borderWidth: 0 })
-              if (f.moved && f.origX !== undefined && f.origY !== undefined) {
-                wp.drawRectangle({ ...toPdfRect(f.origX, f.origY), color: rgb(1, 1, 1), borderWidth: 0 })
-              }
-            } catch { /* page missing — skip whiteout */ }
+            // Empty text boxes have nothing to erase — white-out here would
+            // only destroy the printed design behind them (the user's
+            // "hide a box and it eats the format" report). Filled boxes and
+            // checkboxes keep the white-out so baked-in content doesn't show.
+            const emptyTx = f.type === 'Tx' && f.value === ''
+            if (!emptyTx) {
+              try {
+                wp.drawRectangle({ ...toPdfRect(f.x, f.y), color: rgb(1, 1, 1), borderWidth: 0 })
+                if (f.moved && f.origX !== undefined && f.origY !== undefined) {
+                  wp.drawRectangle({ ...toPdfRect(f.origX, f.origY), color: rgb(1, 1, 1), borderWidth: 0 })
+                }
+              } catch { /* page missing — skip whiteout */ }
+            }
             try {
               const w = getWidget()
               const r = w.getRectangle()
@@ -2339,9 +2378,11 @@ export default function EditarPdf() {
                 const selected = selectedField === key
                 const chromeVisible = selected ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'
                 if (f.hidden) {
-                  // Hidden = the export whites out the scan's checkbox/field here;
-                  // mirror that in the preview so what you see matches the PDF.
+                  // Mirror the export: empty text boxes are NOT whiteed out
+                  // there (the printed design must survive), so nothing
+                  // renders here either; other hidden fields show the patch.
                   if (!showBackground) return null
+                  if (f.type === 'Tx' && f.value === '') return null
                   return (
                     <div
                       key={`ff-${f.page}-${f.name}-${f.type}-${f.exportValue || ''}-hidden`}
