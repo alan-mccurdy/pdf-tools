@@ -162,6 +162,12 @@ async function loadState(fileName: string): Promise<EditorState | null> {
   } catch { return null }
 }
 
+// Key by name+size+lastModified: many different files share a name
+// (informe.pdf from two sources), and the old name-only key bled edits
+// across them. Reads still fall back to the legacy name-only key so
+// existing saved edits survive the migration.
+const stateKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`
+
 /* ── Font helpers ───────────────────────────────────────── */
 
 const FONT_FAMILIES = [
@@ -494,7 +500,12 @@ export default function EditarPdf() {
       const bytes = await f.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
       const page = await pdf.getPage(pageNum + 1)
-      const viewport = page.getViewport({ scale: sc })
+      // Render for OCR at >= 2.5x even when the preview zoom is lower:
+      // tesseract starts losing small/printed text below ~2x. Word boxes are
+      // divided back to preview px before grouping, so overlay coords keep
+      // their existing contract (screen px at `sc`).
+      const ocrSc = Math.max(sc, 2.5)
+      const viewport = page.getViewport({ scale: ocrSc })
       const off = document.createElement('canvas')
       off.width = Math.ceil(viewport.width)
       off.height = Math.ceil(viewport.height)
@@ -507,7 +518,14 @@ export default function EditarPdf() {
       // prefix as bare image pixels. The main canvas already renders with
       // DISABLE (see the render effect below) — OCR must see the same pixels.
       await page.render({ canvasContext: ctx, viewport, annotationMode: pdfjsLib.AnnotationMode.DISABLE } as never).promise
-      const words = await extractWordsFromImage(off)
+      const rawWords = await extractWordsFromImage(off)
+      // Map word boxes from the OCR render scale back to preview px
+      const words = ocrSc !== sc
+        ? rawWords.map(w => {
+            const back = sc / ocrSc
+            return { ...w, x0: w.x0 * back, y0: w.y0 * back, x1: w.x1 * back, y1: w.y1 * back }
+          })
+        : rawWords
       let items = groupWordsToItems(words, sc, pageNum, () => nextId.current++)
       // If the user zoomed while OCR was running, map coords to the current scale
       const cur = lastScaleRef.current
@@ -551,9 +569,12 @@ export default function EditarPdf() {
             return f
           })
           const unmatched = editedPrev.filter(e => !used.has(e))
+          // Page bounds in preview px (viewport is rendered at ocrSc >= sc)
+          const pageW = viewport.width * (sc / ocrSc)
+          const pageH = viewport.height * (sc / ocrSc)
           const keepUnmatched = unmatched.filter(e =>
             e.width >= 8 && e.height >= 4 &&
-            e.x >= -10 && e.y >= -10 && e.x <= viewport.width + 10 && e.y <= viewport.height + 10
+            e.x >= -10 && e.y >= -10 && e.x <= pageW + 10 && e.y <= pageH + 10
           )
           // Don't stack OCR duplicates on top of real text-layer items (the
           // text layer wins: it is exact even when tesseract misreads it).
@@ -776,7 +797,7 @@ export default function EditarPdf() {
     if (!file) return
     if (hydratedFile !== file) return // never write before the restore lands
     const timer = setTimeout(() => {
-      saveState(file.name, { boxes, images, strokes, existingTexts, formFields })
+      saveState(stateKey(file), { boxes, images, strokes, existingTexts, formFields })
       setShowSaved(true)
       setTimeout(() => setShowSaved(false), 1500)
     }, 500)
@@ -817,8 +838,15 @@ export default function EditarPdf() {
         nextId.current = 1
       }
     }
-    loadState(file.name)
-      .then(saved => applySaved(saved))
+    ;(async () => {
+      let saved = await loadState(stateKey(file))
+      if (!saved) {
+        // Legacy name-only key (pre-migration saves) — adopt and migrate
+        saved = await loadState(file.name)
+        if (saved) void saveState(stateKey(file), saved)
+      }
+      applySaved(saved)
+    })()
       .catch(() => applySaved(null))
       .finally(() => { if (!cancelled) setHydratedFile(file) })
     return () => { cancelled = true }
@@ -917,7 +945,7 @@ export default function EditarPdf() {
       const viewportHeight = viewport.height
 
       // Filter valid items with position
-      const validItems = items.filter(i => i.str?.trim() && i.transform).map(i => ({
+      const rawItems = items.filter(i => i.str?.trim() && i.transform).map(i => ({
         str: i.str,
         transform: i.transform,
         fontName: i.fontName || '',
@@ -925,6 +953,38 @@ export default function EditarPdf() {
         height: i.height || 0,
         dir: i.dir || 'ltr',
       }))
+
+      // The editor's export "whites out" text by painting a rectangle and
+      // re-drawing it — the original operators stay in the content stream, so a
+      // re-imported PDF yields TWO stacked copies of every covered string at the
+      // same position (confirmed ghost bug: both the original and the edited
+      // text extract at identical x/y). Content streams paint in order, so the
+      // LATER item is on top = what the user actually sees. Drop any item that
+      // is fully covered (same baseline + x-overlap) by a later item.
+      const isCoveredBy = (a: (typeof rawItems)[number], b: (typeof rawItems)[number]): boolean => {
+        const fa = Math.abs(a.transform[3]) || 12
+        const fb = Math.abs(b.transform[3]) || 12
+        const f = Math.max(fa, fb)
+        // Same baseline (within half a font size) — different lines never overlap
+        if (Math.abs(a.transform[5] - b.transform[5]) > f * 0.5) return false
+        const ax = a.transform[4]
+        const bx = b.transform[4]
+        if (a.width > 0 && b.width > 0) {
+          // Both have known extents: require substantial horizontal overlap
+          const overlap = Math.min(ax + a.width, bx + b.width) - Math.max(ax, bx)
+          return overlap >= Math.min(a.width, b.width) * 0.6
+        }
+        // Zero-width items (spaces/decorations): same origin within half an em
+        return Math.abs(ax - bx) <= f * 0.5
+      }
+      const keptItems: typeof rawItems = []
+      for (let i = rawItems.length - 1; i >= 0; i--) {
+        const item = rawItems[i]
+        const covered = keptItems.some(k => isCoveredBy(item, k))
+        if (!covered) keptItems.push(item)
+      }
+      keptItems.reverse() // restore original paint order
+      const validItems = keptItems
 
       // Group by Y-coordinate (lines) with 3px tolerance
       const Y_TOLERANCE = 3
@@ -1040,10 +1100,26 @@ export default function EditarPdf() {
         const other = prev.filter(t => t.page !== currentPage || t.source === 'ocr')
         return [...other, ...newItems]
       })
-      // Sparse text layer: a re-opened edited export only carries the redrawn
-      // strokes as real text — without running OCR too, the scanned rest of
-      // the page would never get its editable layer back.
-      if (validItems.length < 10) void runOcr(currentPage, scale)
+      // Auto-run OCR ONLY on genuinely scanned pages: no text layer at all, or
+      // a junk/hidden layer (mostly non-alphanumeric artifacts). Pages that
+      // already carry real alphanumeric text are NOT re-OCR'd: OCR rasterizes
+      // the whole rendered page, so it would (a) turn image logos/designs into
+      // editable text and (b) stack OCR noise over the exact native text of an
+      // editor-exported PDF — the two things that scrambled layouts on re-upload.
+      // The old sparse checks (<10 items, bbox coverage <3%) fired on any page
+      // with little real text, which is exactly the common case.
+      const alnumItems = validItems.filter(i => /[\p{L}\p{N}]/u.test(i.str)).length
+      const alnumRatio = validItems.length > 0 ? alnumItems / validItems.length : 0
+
+      const shouldOcr = validItems.length === 0 || alnumRatio < 0.3
+
+      if (shouldOcr) {
+        // Clear cache so we re-extract fresh OCR
+        const key = `${file.name}:${currentPage}`
+        ocrDoneRef.current.delete(key)
+        ocrInFlightRef.current.delete(key)
+        void runOcr(currentPage, scale)
+      }
     }
     extract().catch(() => {})
   }, [file, currentPage, scale, hydratedFile])
@@ -1114,15 +1190,24 @@ export default function EditarPdf() {
 
   // ── Text box handlers ──────────────────────────────────
 
-  const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if (mode !== 'text') return
-    if ((e.target as HTMLElement).closest('.editor-box')) return
-    if ((e.target as HTMLElement).closest('.editor-image')) return
-    if ((e.target as HTMLElement).closest('.existing-text')) return
+    const target = e.target as HTMLElement
+    if (target.closest('.editor-box')) return
+    if (target.closest('.editor-image')) return
+    if (target.closest('.existing-text')) return
     setSelectedField(null)
     const rect = overlayRef.current!.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    let clientX: number, clientY: number
+    if ('touches' in e && e.touches.length > 0) {
+      clientX = e.touches[0].clientX
+      clientY = e.touches[0].clientY
+    } else {
+      clientX = (e as React.MouseEvent<HTMLDivElement>).clientX
+      clientY = (e as React.MouseEvent<HTMLDivElement>).clientY
+    }
+    const x = clientX - rect.left
+    const y = clientY - rect.top
     const id = nextId.current++
     pushHistory()
     setBoxes(prev => [...prev, {
@@ -1211,6 +1296,8 @@ export default function EditarPdf() {
         const y = (canvas.height - h) / 2
         pushHistory()
         setImages(prev => [...prev, { id, x, y, width: w, height: h, src: reader.result as string, page: currentPage }])
+        // Auto-select so the move handle is immediately visible/active
+        setSelectedImage(id)
       }
       img.src = reader.result as string
     }
@@ -1298,6 +1385,9 @@ export default function EditarPdf() {
       const y = canvasEl.height - h - 60 // Place near bottom
       pushHistory()
       setImages(prev => [...prev, { id, x, y, width: w, height: h, src: dataUrl, page: currentPage }])
+      // Auto-select so the move handle is immediately visible/active (touch
+      // devices can't hover to reveal it, so the box otherwise looks stuck).
+      setSelectedImage(id)
       setShowSignature(false)
     }
     img.src = dataUrl
@@ -1305,17 +1395,29 @@ export default function EditarPdf() {
 
   // ── Drawing handlers ───────────────────────────────────
 
-  const handleDrawStart = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (mode !== 'draw') return
-    isDrawing.current = true
+  const getDrawCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
-    currentStroke.current = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]
-  }, [mode])
+    if ('touches' in e && e.touches.length > 0) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }
+    }
+    if ('changedTouches' in e && e.changedTouches.length > 0) {
+      return { x: e.changedTouches[0].clientX - rect.left, y: e.changedTouches[0].clientY - rect.top }
+    }
+    // React.MouseEvent
+    return { x: (e as React.MouseEvent<HTMLCanvasElement>).clientX - rect.left, y: (e as React.MouseEvent<HTMLCanvasElement>).clientY - rect.top }
+  }, [])
 
-  const handleDrawMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleDrawStart = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (mode !== 'draw') return
+    e.preventDefault()
+    isDrawing.current = true
+    currentStroke.current = [getDrawCoords(e)]
+  }, [mode, getDrawCoords])
+
+  const handleDrawMove = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current || mode !== 'draw') return
-    const rect = e.currentTarget.getBoundingClientRect()
-    currentStroke.current.push({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    e.preventDefault()
+    currentStroke.current.push(getDrawCoords(e))
     // Live preview
     const canvas = drawCanvasRef.current
     if (!canvas) return
@@ -1332,14 +1434,12 @@ export default function EditarPdf() {
       ctx.lineTo(curr.x, curr.y)
       ctx.stroke()
     }
-  }, [mode, drawColor, drawSize])
+  }, [mode, drawColor, drawSize, getDrawCoords])
 
-  const handleDrawEnd = useCallback(() => {
+  const handleDrawEnd = useCallback((_e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current) return
     isDrawing.current = false
     if (currentStroke.current.length >= 2) {
-      // Capture points BEFORE queueing: state updaters run deferred, after
-      // currentStroke.current is cleared below (would save an empty stroke)
       const pts = [...currentStroke.current]
       pushHistory()
       setStrokes(prev => [...prev, {
@@ -1355,18 +1455,33 @@ export default function EditarPdf() {
 
   // ── Drag handlers ──────────────────────────────────────
 
-  const handleBoxDragStart = useCallback((e: React.MouseEvent, id: number) => {
+  // Unified touch/mouse coordinate extraction
+  const getClientXY = useCallback((e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
+    if ('touches' in e && e.touches.length > 0) {
+      return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY }
+    }
+    if ('changedTouches' in e && e.changedTouches.length > 0) {
+      return { clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY }
+    }
+    // React.MouseEvent / MouseEvent
+    return { clientX: (e as MouseEvent).clientX, clientY: (e as MouseEvent).clientY }
+  }, [])
+
+  const handleBoxDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
     e.stopPropagation()
+    e.preventDefault() // Prevent scroll during drag
     const box = boxes.find(b => b.id === id)
     if (!box) return
-    dragRef.current = { id, startX: e.clientX, startY: e.clientY, boxX: box.x, boxY: box.y }
+    const { clientX, clientY } = getClientXY(e)
+    dragRef.current = { id, startX: clientX, startY: clientY, boxX: box.x, boxY: box.y }
     setSelectedBox(id)
     setSelectedImage(null)
 
-    const handleMove = (ev: MouseEvent) => {
+    const handleMove = (ev: MouseEvent | TouchEvent) => {
       if (!dragRef.current) return
-      const dx = ev.clientX - dragRef.current.startX
-      const dy = ev.clientY - dragRef.current.startY
+      const { clientX: cx, clientY: cy } = getClientXY(ev)
+      const dx = cx - dragRef.current.startX
+      const dy = cy - dragRef.current.startY
       setBoxes(prev => prev.map(b =>
         b.id === dragRef.current!.id
           ? { ...b, x: dragRef.current!.boxX + dx, y: dragRef.current!.boxY + dy }
@@ -1377,23 +1492,32 @@ export default function EditarPdf() {
       dragRef.current = null
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
     }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
-  }, [boxes])
+    window.addEventListener('touchmove', handleMove, { passive: false })
+    window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
+  }, [boxes, getClientXY])
 
-  const handleImageDragStart = useCallback((e: React.MouseEvent, id: number) => {
+  const handleImageDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
     e.stopPropagation()
+    e.preventDefault()
     const img = images.find(i => i.id === id)
     if (!img) return
-    imgDragRef.current = { id, startX: e.clientX, startY: e.clientY, imgX: img.x, imgY: img.y }
+    const { clientX, clientY } = getClientXY(e)
+    imgDragRef.current = { id, startX: clientX, startY: clientY, imgX: img.x, imgY: img.y }
     setSelectedImage(id)
     setSelectedBox(null)
 
-    const handleMove = (ev: MouseEvent) => {
+    const handleMove = (ev: MouseEvent | TouchEvent) => {
       if (!imgDragRef.current) return
-      const dx = ev.clientX - imgDragRef.current.startX
-      const dy = ev.clientY - imgDragRef.current.startY
+      const { clientX: cx, clientY: cy } = getClientXY(ev)
+      const dx = cx - imgDragRef.current.startX
+      const dy = cy - imgDragRef.current.startY
       setImages(prev => prev.map(i =>
         i.id === imgDragRef.current!.id
           ? { ...i, x: imgDragRef.current!.imgX + dx, y: imgDragRef.current!.imgY + dy }
@@ -1404,29 +1528,36 @@ export default function EditarPdf() {
       imgDragRef.current = null
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
     }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
-  }, [images])
+    window.addEventListener('touchmove', handleMove, { passive: false })
+    window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
+  }, [images, getClientXY])
 
   // ── Drag extracted text items (OCR/text-layer) ──────────
-  const handleExistingDragStart = useCallback((e: React.MouseEvent, id: number) => {
+  const handleExistingDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
     e.stopPropagation()
+    e.preventDefault()
     const item = existingTexts.find(t => t.id === id)
     if (!item) return
-    existingDragRef.current = { id, startX: e.clientX, startY: e.clientY, itemX: item.x, itemY: item.y }
+    const { clientX, clientY } = getClientXY(e)
+    existingDragRef.current = { id, startX: clientX, startY: clientY, itemX: item.x, itemY: item.y }
     setSelectedExisting(id)
     setSelectedBox(null)
     setSelectedImage(null)
     setSelectedField(null)
     let pushed = false
-    const handleMove = (ev: MouseEvent) => {
+    const handleMove = (ev: MouseEvent | TouchEvent) => {
       if (!existingDragRef.current) return
-      const dx = ev.clientX - existingDragRef.current.startX
-      const dy = ev.clientY - existingDragRef.current.startY
+      const { clientX: cx, clientY: cy } = getClientXY(ev)
+      const dx = cx - existingDragRef.current.startX
+      const dy = cy - existingDragRef.current.startY
       if (!pushed && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
-        // Snapshot the pre-drag state once real movement starts (keeps a
-        // simple click from polluting the undo stack).
         pushed = true
         pushHistory()
       }
@@ -1441,27 +1572,36 @@ export default function EditarPdf() {
       existingDragRef.current = null
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
     }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
-  }, [existingTexts, pushHistory])
+    window.addEventListener('touchmove', handleMove, { passive: false })
+    window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
+  }, [existingTexts, pushHistory, getClientXY])
 
   // ── Drag / hide native AcroForm fields ──────────────────
   const fieldKey = useCallback((f: FormField) => `${f.page}|${f.name}|${f.type}|${f.exportValue || ''}`, [])
 
-  const handleFieldDragStart = useCallback((e: React.MouseEvent, f: FormField) => {
+  const handleFieldDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, f: FormField) => {
     e.stopPropagation()
+    e.preventDefault()
     const key = fieldKey(f)
-    fieldDragRef.current = { key, startX: e.clientX, startY: e.clientY, fx: f.x, fy: f.y }
+    const { clientX, clientY } = getClientXY(e)
+    fieldDragRef.current = { key, startX: clientX, startY: clientY, fx: f.x, fy: f.y }
     setSelectedField(key)
     setSelectedBox(null)
     setSelectedImage(null)
     setSelectedExisting(null)
     let pushed = false
-    const handleMove = (ev: MouseEvent) => {
+    const handleMove = (ev: MouseEvent | TouchEvent) => {
       if (!fieldDragRef.current) return
-      const dx = ev.clientX - fieldDragRef.current.startX
-      const dy = ev.clientY - fieldDragRef.current.startY
+      const { clientX: cx, clientY: cy } = getClientXY(ev)
+      const dx = cx - fieldDragRef.current.startX
+      const dy = cy - fieldDragRef.current.startY
       if (!pushed && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
         pushed = true
         pushHistory()
@@ -1477,10 +1617,16 @@ export default function EditarPdf() {
       fieldDragRef.current = null
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
     }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
-  }, [pushHistory, fieldKey])
+    window.addEventListener('touchmove', handleMove, { passive: false })
+    window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
+  }, [pushHistory, fieldKey, getClientXY])
 
   const hideFormField = useCallback((f: FormField) => {
     pushHistory()
@@ -1789,11 +1935,15 @@ export default function EditarPdf() {
           color: rgb(1, 1, 1),
           borderWidth: 0,
         })
-        // Draw edited text — baseline matched to the preview's line box
+        // Draw edited text — baseline is the extraction formula inverted
+        // exactly (y = viewportH - baseline*scale - fontSize*scale), i.e. the
+        // same 1.0 factor used by extraction AND by the text-box export below.
+        // The old 0.92 factor shifted the baseline down 0.08em per export/
+        // re-import cycle, so repeated round-trips drifted the layout.
         const font = await getFont(item.fontFamily, item.bold, item.italic)
         page.drawText(item.text, {
           x: item.x / scale,
-          y: height - item.y / scale - (item.fontSize * 0.92),
+          y: height - item.y / scale - item.fontSize,
           font,
           size: item.fontSize,
           color: hexToRgb(item.fontColor),
@@ -2076,21 +2226,7 @@ export default function EditarPdf() {
         </select>
       </div>
 
-      <div className="spatial-toolbar-separator" />
-
-      {/* Undo / Redo */}
-      <button className="spatial-btn-icon" onClick={undo} title="Deshacer (Ctrl+Z)" disabled={history.length === 0}>
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-        </svg>
-      </button>
-      <button className="spatial-btn-icon" onClick={redo} title="Rehacer (Ctrl+Y)" disabled={redoStack.length === 0}>
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10H11a8 8 0 00-8 8v2m18-10l-6 6m6-6l-6-6" />
-        </svg>
-      </button>
-
-      <div className="spatial-toolbar-separator" />
+<div className="spatial-toolbar-separator" />
 
       {/* Zoom */}
       <div className="flex items-center gap-2">
@@ -2171,18 +2307,23 @@ export default function EditarPdf() {
             />
             <canvas
               ref={drawCanvasRef}
-              className="absolute inset-0"
-              style={{ cursor: mode === 'draw' ? 'crosshair' : 'default', pointerEvents: mode === 'draw' ? 'auto' : 'none' }}
+              className="absolute inset-0 touch-none"
+              style={{ cursor: mode === 'draw' ? 'crosshair' : 'default', pointerEvents: mode === 'draw' ? 'auto' : 'none', touchAction: mode === 'draw' ? 'none' : 'auto' }}
               onMouseDown={handleDrawStart}
               onMouseMove={handleDrawMove}
               onMouseUp={handleDrawEnd}
               onMouseLeave={handleDrawEnd}
+              onTouchStart={handleDrawStart}
+              onTouchMove={handleDrawMove}
+              onTouchEnd={handleDrawEnd}
+              onTouchCancel={handleDrawEnd}
             />
             <div
               ref={overlayRef}
-              className="absolute inset-0"
-              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none' }}
+              className="absolute inset-0 touch-none"
+              style={{ cursor: mode === 'text' ? 'crosshair' : 'default', pointerEvents: mode === 'text' ? 'auto' : 'none', touchAction: mode === 'text' ? 'none' : 'auto' }}
               onClick={handleOverlayClick}
+              onTouchStart={handleOverlayClick}
             >
               {/* Text boxes */}
               {currentBoxes.map(box => (
@@ -2195,9 +2336,10 @@ export default function EditarPdf() {
                 >
                   {/* Drag handle - always visible */}
                   <div
-                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none' }}
+                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move touch-none"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleBoxDragStart(e, box.id)}
+                    onTouchStart={e => handleBoxDragStart(e, box.id)}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -2216,21 +2358,28 @@ export default function EditarPdf() {
                   </button>
                   {/* Width resize handle */}
                   <div
-                    className="absolute top-0 -right-1.5 w-2 h-full cursor-ew-resize opacity-0 group-hover:opacity-50"
-                    style={{ background: 'var(--accent)' }}
+                    className="absolute top-0 -right-1.5 w-2 h-full cursor-ew-resize opacity-0 group-hover:opacity-50 touch-none"
+                    style={{ background: 'var(--accent)', touchAction: 'none' }}
                     onMouseDown={e => {
                       e.stopPropagation()
                       const startX = e.clientX
                       const startW = box.width
-                      const onMove = (ev: MouseEvent) => {
-                        updateBoxWidth(box.id, startW + (ev.clientX - startX))
+                      const onMove = (ev: MouseEvent | TouchEvent) => {
+                        const cx = 'touches' in ev ? ev.touches[0].clientX : ev.clientX
+                        updateBoxWidth(box.id, startW + (cx - startX))
                       }
                       const onUp = () => {
                         window.removeEventListener('mousemove', onMove)
                         window.removeEventListener('mouseup', onUp)
+                        window.removeEventListener('touchmove', onMove)
+                        window.removeEventListener('touchend', onUp)
+                        window.removeEventListener('touchcancel', onUp)
                       }
                       window.addEventListener('mousemove', onMove)
                       window.addEventListener('mouseup', onUp)
+                      window.addEventListener('touchmove', onMove, { passive: false })
+                      window.addEventListener('touchend', onUp)
+                      window.addEventListener('touchcancel', onUp)
                     }}
                   />
                   {/* Editable text */}
@@ -2243,7 +2392,10 @@ export default function EditarPdf() {
                       fontSize: box.fontSize * scale,
                       fontFamily: box.fontFamily,
                       color: box.fontColor || '#1e293b',
-                      backgroundColor: box.highlightColor || 'rgba(244,247,255,0.22)',
+                      // Transparent when the PDF design is visible so the page
+                      // color/design isn't masked by a white box; keep a faint
+                      // tint only in "solo texto" mode (canvas hidden, white base).
+                      backgroundColor: box.highlightColor || (showBackground ? 'transparent' : 'rgba(244,247,255,0.15)'),
                       fontWeight: box.bold ? 'bold' : 'normal',
                       fontStyle: box.italic ? 'italic' : 'normal',
                       textDecoration: box.underline ? 'underline' : 'none',
@@ -2254,7 +2406,7 @@ export default function EditarPdf() {
                         : '1.5px dashed #38bdf8',
                       borderRadius: '6px',
                       lineHeight: 1.4,
-                      backdropFilter: 'blur(2px)',
+                      backdropFilter: 'none',
                       boxShadow: selectedBox === box.id ? '0 0 8px rgba(125,211,252,0.3)' : 'none',
                       transition: 'box-shadow 0.15s ease',
                     }}
@@ -2277,9 +2429,10 @@ export default function EditarPdf() {
                   {/* Drag handle + delete — hover on desktop, always visible when selected (touch) */}
                   <div className={`absolute -top-6 left-0 right-0 flex items-center transition-opacity ${selectedExisting === item.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}>
                     <div
-                      className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
-                      style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none' }}
+                      className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                      style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none', touchAction: 'none' }}
                       onMouseDown={e => handleExistingDragStart(e, item.id)}
+                      onTouchStart={e => handleExistingDragStart(e, item.id)}
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -2297,15 +2450,28 @@ export default function EditarPdf() {
                   </div>
                   {/* Editable text — same font size as export (no 0.75 factor) */}
                   <TextEditor
-                    value={item.text}
+                    // Idle (not edited, not selected): render nothing — the
+                    // canvas below already shows the original text, so a
+                    // non-empty overlay would double it (visible as ~2px blur
+                    // once the overlay went transparent). Selected/edited items
+                    // show their text as before.
+                    value={active ? item.text : ''}
                     className="min-w-[40px] outline-none whitespace-pre"
                     style={{
                       fontSize: item.fontSize * scale,
                       fontFamily: item.fontFamily,
                       color: item.edited ? (item.fontColor || '#0f172a') : '#0f172a',
-                      backgroundColor: showBackground
-                        ? '#ffffff'
-                        : (active ? 'rgba(56,189,248,0.10)' : 'transparent'),
+                      // Edited items get a near-opaque mask: export whites the
+                      // region out and redraws, so the preview must match the
+                      // PDF (the baked-in original would otherwise bleed
+                      // through). Non-edited items stay see-through over the
+                      // design; "solo texto" keeps a faint white base so the
+                      // caret stays readable.
+                      backgroundColor: item.edited
+                        ? 'rgba(255,255,255,0.92)'
+                        : showBackground
+                          ? (active ? 'rgba(56,189,248,0.15)' : 'transparent')
+                          : (active ? 'rgba(56,189,248,0.15)' : 'rgba(255,255,255,0.75)'),
                       fontWeight: item.bold ? 'bold' : 'normal',
                       fontStyle: item.italic ? 'italic' : 'normal',
                       width: item.width,
@@ -2343,9 +2509,10 @@ export default function EditarPdf() {
                 >
                   {/* Drag handle — visible on hover OR when selected */}
                   <div
-                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none' }}
+                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
+                    onTouchStart={e => handleImageDragStart(e, img.id)}
                   >
                     <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -2402,9 +2569,10 @@ export default function EditarPdf() {
                       {/* Drag handle + hide — hover on desktop, sticky when selected */}
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
-                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
-                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
+                          onTouchStart={e => handleFieldDragStart(e, f)}
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -2440,10 +2608,15 @@ export default function EditarPdf() {
                           lineHeight: `${f.height}px`,
                           fontFamily: 'Helvetica, Arial, sans-serif',
                           color: '#0f172a',
+                          // Touched fields are whiteed out + redrawn on
+                          // export, so the preview must mask the baked-in scan
+                          // value the same way. Untouched fields export
+                          // unchanged → stay transparent so the design shows
+                          // through. Solo-texto keeps a faint white base.
                           background: showBackground
-                            // touched-but-empty keeps the white patch: clearing a
-                            // baked-in scan value must actually cover it up
-                            ? (f.value || f.touched ? '#ffffff' : 'transparent')
+                            ? (f.touched
+                                ? 'rgba(255,255,255,0.92)'
+                                : (selected ? 'rgba(56,189,248,0.15)' : 'transparent'))
                             : 'rgba(255,255,255,0.75)',
                           border: showBackground ? 'none' : '1px dashed rgba(56,189,248,0.7)',
                           outline: 'none',
@@ -2470,9 +2643,10 @@ export default function EditarPdf() {
                     >
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
-                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
-                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
+                          onTouchStart={e => handleFieldDragStart(e, f)}
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />

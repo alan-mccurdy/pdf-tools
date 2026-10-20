@@ -55,6 +55,25 @@ export default function InsertarImagenes() {
     }
   }, [])
 
+  // Placed images are stored in scaled overlay px — rescale them on zoom so
+  // they stay anchored to the page. Without this, changing the slider after
+  // placing drifts every image on screen AND exports at the wrong PDF coords
+  // (export divides by the current scale). Same effect as EditarPdf's.
+  const lastScaleRef = useRef(scale)
+  useEffect(() => {
+    const prev = lastScaleRef.current
+    if (prev === scale) return
+    const r = scale / prev
+    setImages(prevImgs => prevImgs.map(img => ({
+      ...img,
+      x: img.x * r,
+      y: img.y * r,
+      width: img.width * r,
+      height: img.height * r,
+    })))
+    lastScaleRef.current = scale
+  }, [scale])
+
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!imgFile) return
     const rect = canvasRef.current!.getBoundingClientRect()
