@@ -370,10 +370,23 @@ body {
   50% { box-shadow: 0 0 0 6px rgba(125, 211, 252, 0.06); }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 /* └─ Utility ────────────────────────────────────────────── */
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Touch action utilities */
+.touch-none { touch-action: none; }
+.touch-auto { touch-action: auto; }
+.touch-manipulation { touch-action: manipulation; }
 
 /* ── Fallback Glass Classes for SVG/Time Travel ───────────────── */
 
@@ -499,5 +512,69 @@ input[type="number"].w-14, input[type="text"].w-14 {
   .spatial-toolbar {
     max-width: 1400px;
     margin: 0 auto;
+  }
+}
+
+/* ── House Ads (Self-hosted, privacy-respecting) ──────────── */
+.house-ad {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+}
+
+.house-ad-top {
+  width: 100%;
+  min-height: 80px;
+}
+
+.house-ad-sidebar {
+  width: 100%;
+  min-height: 120px;
+  flex-direction: column;
+  text-align: center;
+  gap: 2px;
+}
+
+.house-ad-sidebar .w-10 {
+  width: 3rem;
+  height: 3rem;
+}
+
+.house-ad-sidebar .text-sm {
+  font-size: 0.75rem;
+}
+
+.house-ad-bottom {
+  width: 100%;
+  min-height: 80px;
+}
+
+/* AdSense fallback styling */
+.adsense-slot {
+  width: 100%;
+  min-height: 90px;
+}
+
+.adsense-slot .adsbygoogle {
+  display: block;
+  min-height: 90px;
+}
+
+/* Responsive ad adjustments */
+@media (max-width: 768px) {
+  .house-ad-sidebar {
+    min-height: 100px;
+  }
+  .house-ad-top,
+  .house-ad-bottom {
+    min-height: 70px;
+  }
+}
+
+@media (max-width: 375px) {
+  .house-ad {
+    padding: 12px;
+  }
+  .house-ad-sidebar {
+    min-height: 90px;
   }
 }

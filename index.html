@@ -1,24 +1,46 @@
 <!doctype html>
 <html lang="es">
   <head>
-    <!-- Google AdSense -->
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script>
+    <!-- Google AdSense (disabled by default - enable after approval) -->
+    <!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script> -->
+
+    <!-- Search Console Verification (replace with your verification code) -->
+    <!-- <meta name="google-site-verification" content="YOUR_VERIFICATION_CODE" /> -->
+    <!-- <meta name="yandex-verification" content="YOUR_VERIFICATION_CODE" /> -->
+    <!-- <meta name="msvalidate.01" content="YOUR_VERIFICATION_CODE" /> -->
+
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary Meta Tags -->
     <title>Editor PDF Online Gratis — PDF Tools</title>
-    <meta name="description" content="Edita texto, filma, combina y comparte tus PDFs gratis sin subirlos a servidores. 9 herramientas profesionales." />
-    <meta property="og:title" content="Editor PDF Online Gratis — PDF Tools" />
-    <meta property="og:description" content="Edita texto, filma, combina y comparte tus PDFs gratis sin subirlos a servidores. 9 herramientas profesionales." />
-    <meta property="og:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
-    <meta property="og:url" content="https://alan-mccurdy.github.io/pdf-tools/" />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Editor PDF Online Gratis — PDF Tools" />
-    <meta name="twitter:description" content="Edita texto, filma, combina y comparte tus PDFs gratis sin subirlos a servidores. 9 herramientas profesionales." />
-    <meta name="twitter:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
+    <meta name="description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+    <meta name="keywords" content="PDF, editor, gratis, online, unir, separar, comprimir, rotar, OCR, Word, convertir" />
+    <meta name="author" content="Alan García Pérez" />
+    <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://alan-mccurdy.github.io/pdf-tools/" />
-    
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://alan-mccurdy.github.io/pdf-tools/" />
+    <meta property="og:title" content="Editor PDF Online Gratis — PDF Tools" />
+    <meta property="og:description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+    <meta property="og:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="PDF Tools" />
+    <meta property="og:locale" content="es_ES" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://alan-mccurdy.github.io/pdf-tools/" />
+    <meta name="twitter:title" content="Editor PDF Online Gratis — PDF Tools" />
+    <meta name="twitter:description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+    <meta name="twitter:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
+    <meta name="twitter:site" content="@alan_mccurdy" />
+    <meta name="twitter:creator" content="@alan_mccurdy" />
+
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#08080d" />
@@ -26,6 +48,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="PDF Tools" />
     <link rel="apple-touch-icon" href="/favicon-192x192.png" />
+
+    <!-- Performance: Preload critical resources -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="https://fonts.gstatic.com/s/inter/v19/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hjp-Ek-_EeA.woff2" />
+    <link rel="preload" as="image" href="/og-image.png" />
+
+    <!-- DNS Prefetch for external resources -->
+    <link rel="dns-prefetch" href="https://pagead2.googlesyndication.com" />
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+
+    <!-- Preconnect for critical third-party origins -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- RSS/Atom feed (optional) -->
+    <!-- <link rel="alternate" type="application/rss+xml" title="PDF Tools Blog" href="/feed.xml" /> -->
   </head>
   <body>
     <div id="root"></div>
@@ -38,6 +75,66 @@
           var repo = '/pdf-tools';
           window.history.replaceState(null, '', repo + redirect);
         }
+      })();
+
+      // Web Vitals tracking (privacy-friendly, no PII)
+      // Sends to console in dev, can be extended to send to analytics endpoint
+      (function() {
+        var vitals = {};
+        var sent = false;
+
+        function sendVitals() {
+          if (sent || !navigator.sendBeacon) return;
+          sent = true;
+          // In production, replace with your analytics endpoint
+          // navigator.sendBeacon('/api/vitals', JSON.stringify(vitals));
+          console.log('[Web Vitals]', vitals);
+        }
+
+        // LCP
+        try {
+          new PerformanceObserver(function(list) {
+            var entries = list.getEntries();
+            var last = entries[entries.length - 1];
+            vitals.lcp = Math.round(last.startTime);
+            sendVitals();
+          }).observe({ type: 'largest-contentful-paint', buffered: true });
+        } catch (e) {}
+
+        // FID
+        try {
+          new PerformanceObserver(function(list) {
+            var entries = list.getEntries();
+            var first = entries[0];
+            vitals.fid = Math.round(first.processingStart - first.startTime);
+            sendVitals();
+          }).observe({ type: 'first-input', buffered: true });
+        } catch (e) {}
+
+        // CLS
+        try {
+          var clsValue = 0;
+          new PerformanceObserver(function(list) {
+            var entries = list.getEntries();
+            for (var i = 0; i < entries.length; i++) {
+              if (!entries[i].hadRecentInput) {
+                clsValue += entries[i].value;
+              }
+            }
+            vitals.cls = Math.round(clsValue * 1000) / 1000;
+          }).observe({ type: 'layout-shift', buffered: true });
+        } catch (e) {}
+
+        // TTFB
+        try {
+          var nav = performance.getEntriesByType('navigation')[0];
+          if (nav) {
+            vitals.ttfb = Math.round(nav.responseStart - nav.requestStart);
+          }
+        } catch (e) {}
+
+        // Send on page hide
+        window.addEventListener('pagehide', sendVitals);
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

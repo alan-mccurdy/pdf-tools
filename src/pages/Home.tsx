@@ -1,17 +1,18 @@
 import { Link } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
+import { StructuredData, homeSchemas } from '../utils/structuredData'
 
 const tools = [
-  { path: '/editar-pdf', name: 'Editar PDF', desc: 'Escribe texto sobre paginas PDF', icon: 'edit' },
-  { path: '/unir-pdf', name: 'Unir PDFs', desc: 'Combina multiples PDFs en uno', icon: 'merge' },
+  { path: '/editar-pdf', name: 'Editar PDF', desc: 'Escribe texto sobre páginas PDF', icon: 'edit' },
+  { path: '/unir-pdf', name: 'Unir PDFs', desc: 'Combina múltiples PDFs en uno', icon: 'merge' },
   { path: '/word-a-pdf', name: 'Word a PDF', desc: 'Convierte .docx a PDF', icon: 'convert' },
   { path: '/pdf-a-word', name: 'PDF a Word', desc: 'Convierte PDF a .docx', icon: 'pdfword' },
-  { path: '/separar-pdf', name: 'Separar PDF', desc: 'Extrae paginas de un PDF', icon: 'split' },
-  { path: '/rotar-pdf', name: 'Rotar PDF', desc: 'Rota paginas 90/180/270 grados', icon: 'rotate' },
-  { path: '/comprimir-pdf', name: 'Comprimir PDF', desc: 'Reduce el tamano de tu PDF', icon: 'compress' },
-  { path: '/eliminar-paginas', name: 'Eliminar Paginas', desc: 'Borra paginas de un PDF', icon: 'delete' },
-  { path: '/insertar-imagenes', name: 'Insertar Imagenes', desc: 'Agrega imagenes o firmas', icon: 'image' },
-  { path: '/ocr-pdf', name: 'OCR PDF', desc: 'Extrae texto de imagenes y escaneados', icon: 'ocr' },
+  { path: '/separar-pdf', name: 'Separar PDF', desc: 'Extrae páginas de un PDF', icon: 'split' },
+  { path: '/rotar-pdf', name: 'Rotar PDF', desc: 'Rota páginas 90/180/270 grados', icon: 'rotate' },
+  { path: '/comprimir-pdf', name: 'Comprimir PDF', desc: 'Reduce el tamaño de tu PDF', icon: 'compress' },
+  { path: '/eliminar-paginas', name: 'Eliminar Páginas', desc: 'Borra páginas de un PDF', icon: 'delete' },
+  { path: '/insertar-imagenes', name: 'Insertar Imágenes', desc: 'Agrega imágenes o firmas', icon: 'image' },
+  { path: '/ocr-pdf', name: 'OCR PDF', desc: 'Extrae texto de imágenes y escaneados', icon: 'ocr' },
 ]
 
 function ToolIcon({ icon }: { icon: string }) {
@@ -77,25 +78,26 @@ export default function Home() {
     <>
       <Helmet>
         <title>Editor PDF Online Gratis — PDF Tools</title>
-        <meta name="description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y mas. 100% en tu navegador, sin subir archivos." />
-        <script type="application/ld+json">
-          {JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "WebApplication",
-            "name": "PDF Tools",
-            "url": "https://alan-mccurdy.github.io/pdf-tools/",
-            "description": "Editor PDF online gratis: edita, une, separa, rota, comprime y convierte PDFs sin subir archivos.",
-            "applicationCategory": "UtilitiesApplication",
-            "operatingSystem": "Any",
-            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-            "featureList": [
-              "Editar PDF", "Unir PDFs", "Word a PDF", "PDF a Word",
-              "Separar PDF", "Rotar PDF", "Comprimir PDF",
-              "Eliminar paginas", "Insertar imagenes", "OCR PDF"
-            ]
-          })}
-        </script>
+        <meta name="description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+        <link rel="canonical" href="https://alan-mccurdy.github.io/pdf-tools/" />
+        <meta property="og:title" content="Editor PDF Online Gratis — PDF Tools" />
+        <meta property="og:description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+        <meta property="og:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
+        <meta property="og:url" content="https://alan-mccurdy.github.io/pdf-tools/" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Editor PDF Online Gratis — PDF Tools" />
+        <meta name="twitter:description" content="Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos." />
+        <meta name="twitter:image" content="https://alan-mccurdy.github.io/pdf-tools/og-image.png" />
       </Helmet>
+
+      {/* JSON-LD Structured Data for Home Page */}
+      <StructuredData data={[
+        homeSchemas.softwareApp,
+        homeSchemas.webSite,
+        homeSchemas.organization,
+        homeSchemas.faq,
+      ]} />
 
       <div className="text-center mb-12 fade-in">
         <h1 className="text-5xl font-bold mb-4">
