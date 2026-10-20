@@ -14,6 +14,51 @@ interface PlacedImage {
   imgSrc: string
 }
 
+/** Unified touch/mouse coordinates. */
+const getClientXY = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
+  if ('touches' in e && e.touches.length > 0) return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY }
+  if ('changedTouches' in e && e.changedTouches.length > 0) return { clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY }
+  return { clientX: (e as MouseEvent).clientX, clientY: (e as MouseEvent).clientY }
+}
+
+/** Resize math shared by the mouse and touch paths. */
+const computeResize = (
+  handle: string,
+  dx: number,
+  dy: number,
+  s: { w: number; h: number; ix: number; iy: number },
+  lockAspect: boolean,
+) => {
+  const minSize = 30
+  let newW = s.w
+  let newH = s.h
+  let newX = s.ix
+  let newY = s.iy
+
+  if (handle.includes('e')) newW = Math.max(minSize, s.w + dx)
+  if (handle.includes('w')) {
+    newW = Math.max(minSize, s.w - dx)
+    newX = s.ix + (s.w - newW)
+  }
+  if (handle.includes('s')) newH = Math.max(minSize, s.h + dy)
+  if (handle.includes('n')) {
+    newH = Math.max(minSize, s.h - dy)
+    newY = s.iy + (s.h - newH)
+  }
+
+  // Lock aspect ratio with shift
+  if (lockAspect) {
+    const aspect = s.w / s.h
+    if (Math.abs(dx) > Math.abs(dy)) {
+      newH = newW / aspect
+    } else {
+      newW = newH * aspect
+    }
+  }
+
+  return { x: newX, y: newY, width: newW, height: newH }
+}
+
 export default function InsertarImagenes() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [imgFile, setImgFile] = useState<File | null>(null)
@@ -103,6 +148,57 @@ export default function InsertarImagenes() {
     setResizing({ id, handle, startX: e.clientX, startY: e.clientY, startW: img.width, startH: img.height, startImgX: img.x, startImgY: img.y })
   }
 
+  // ── Touch paths (window-level so the drag survives leaving the element) ──
+
+  const handleImageTouchStart = (e: React.TouchEvent, id: string) => {
+    e.stopPropagation()
+    const img = images.find(i => i.id === id)
+    if (!img) return
+    setSelectedId(id)
+    const rect = canvasRef.current!.getBoundingClientRect()
+    const offsetX = e.touches[0].clientX - rect.left - img.x
+    const offsetY = e.touches[0].clientY - rect.top - img.y
+    const move = (ev: TouchEvent) => {
+      ev.preventDefault() // block page scroll while dragging
+      const c = getClientXY(ev)
+      const r = canvasRef.current!.getBoundingClientRect()
+      setImages(prev => prev.map(i =>
+        i.id === id ? { ...i, x: c.clientX - r.left - offsetX, y: c.clientY - r.top - offsetY } : i
+      ))
+    }
+    const up = () => {
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', up)
+      window.removeEventListener('touchcancel', up)
+    }
+    window.addEventListener('touchmove', move, { passive: false })
+    window.addEventListener('touchend', up)
+    window.addEventListener('touchcancel', up)
+  }
+
+  const handleResizeTouchStart = (e: React.TouchEvent, id: string, handle: string) => {
+    e.stopPropagation()
+    const img = images.find(i => i.id === id)
+    if (!img) return
+    const t = e.touches[0]
+    const start = { x: t.clientX, y: t.clientY }
+    const s = { w: img.width, h: img.height, ix: img.x, iy: img.y }
+    const move = (ev: TouchEvent) => {
+      ev.preventDefault()
+      const c = getClientXY(ev)
+      const next = computeResize(handle, c.clientX - start.x, c.clientY - start.y, s, ev.shiftKey)
+      setImages(prev => prev.map(i => (i.id === id ? { ...i, ...next } : i)))
+    }
+    const up = () => {
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', up)
+      window.removeEventListener('touchcancel', up)
+    }
+    window.addEventListener('touchmove', move, { passive: false })
+    window.addEventListener('touchend', up)
+    window.addEventListener('touchcancel', up)
+  }
+
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragging && !resizing) return
     const rect = canvasRef.current!.getBoundingClientRect()
@@ -118,40 +214,14 @@ export default function InsertarImagenes() {
     }
 
     if (resizing) {
-      const dx = e.clientX - resizing.startX
-      const dy = e.clientY - resizing.startY
-      const minSize = 30
-
-      setImages(prev => prev.map(img => {
-        if (img.id !== resizing.id) return img
-        let newW = resizing.startW
-        let newH = resizing.startH
-        let newX = resizing.startImgX
-        let newY = resizing.startImgY
-
-        if (resizing.handle.includes('e')) newW = Math.max(minSize, resizing.startW + dx)
-        if (resizing.handle.includes('w')) {
-          newW = Math.max(minSize, resizing.startW - dx)
-          newX = resizing.startImgX + (resizing.startW - newW)
-        }
-        if (resizing.handle.includes('s')) newH = Math.max(minSize, resizing.startH + dy)
-        if (resizing.handle.includes('n')) {
-          newH = Math.max(minSize, resizing.startH - dy)
-          newY = resizing.startImgY + (resizing.startH - newH)
-        }
-
-        // Lock aspect ratio with shift
-        if (e.shiftKey) {
-          const aspect = resizing.startW / resizing.startH
-          if (Math.abs(dx) > Math.abs(dy)) {
-            newH = newW / aspect
-          } else {
-            newW = newH * aspect
-          }
-        }
-
-        return { ...img, x: newX, y: newY, width: newW, height: newH }
-      }))
+      const next = computeResize(
+        resizing.handle,
+        e.clientX - resizing.startX,
+        e.clientY - resizing.startY,
+        { w: resizing.startW, h: resizing.startH, ix: resizing.startImgX, iy: resizing.startImgY },
+        e.shiftKey,
+      )
+      setImages(prev => prev.map(img => (img.id === resizing.id ? { ...img, ...next } : img)))
     }
   }, [dragging, resizing])
 
@@ -261,9 +331,10 @@ export default function InsertarImagenes() {
               <div
                 key={img.id}
                 className={`absolute ${selectedId === img.id ? 'ring-2 ring-[var(--accent)]' : ''}`}
-                style={{ left: img.x, top: img.y, width: img.width, height: img.height }}
+                style={{ left: img.x, top: img.y, width: img.width, height: img.height, touchAction: 'none' }}
                 onClick={e => { e.stopPropagation(); setSelectedId(img.id) }}
                 onMouseDown={e => handleImageMouseDown(e, img.id)}
+                onTouchStart={e => handleImageTouchStart(e, img.id)}
               >
                 <img
                   src={img.imgSrc}
@@ -283,8 +354,10 @@ export default function InsertarImagenes() {
                           top: h.includes('n') ? -6 : h.includes('s') ? 'calc(100% - 6px)' : 'calc(50% - 6px)',
                           left: h.includes('w') ? -6 : h.includes('e') ? 'calc(100% - 6px)' : 'calc(50% - 6px)',
                           cursor: h === 'nw' || h === 'se' ? 'nwse-resize' : h === 'ne' || h === 'sw' ? 'nesw-resize' : h === 'n' || h === 's' ? 'ns-resize' : 'ew-resize',
+                          touchAction: 'none',
                         }}
                         onMouseDown={e => handleResizeMouseDown(e, img.id, h)}
+                        onTouchStart={e => handleResizeTouchStart(e, img.id, h)}
                       />
                     ))}
 
