@@ -5,6 +5,7 @@ import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { extractWordsFromImage, type OcrWordBox } from '../utils/ocrService'
+import { computeResize, RESIZE_HANDLES, resizeHandleStyle } from '../utils/pointer'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -1472,6 +1473,7 @@ export default function EditarPdf() {
     e.preventDefault() // Prevent scroll during drag
     const box = boxes.find(b => b.id === id)
     if (!box) return
+    pushHistory() // undo restores the pre-drag position
     const { clientX, clientY } = getClientXY(e)
     dragRef.current = { id, startX: clientX, startY: clientY, boxX: box.x, boxY: box.y }
     setSelectedBox(id)
@@ -1501,13 +1503,14 @@ export default function EditarPdf() {
     window.addEventListener('touchmove', handleMove, { passive: false })
     window.addEventListener('touchend', handleUp)
     window.addEventListener('touchcancel', handleUp)
-  }, [boxes, getClientXY])
+  }, [boxes, getClientXY, pushHistory])
 
   const handleImageDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
     e.stopPropagation()
     e.preventDefault()
     const img = images.find(i => i.id === id)
     if (!img) return
+    pushHistory() // undo restores the pre-drag position
     const { clientX, clientY } = getClientXY(e)
     imgDragRef.current = { id, startX: clientX, startY: clientY, imgX: img.x, imgY: img.y }
     setSelectedImage(id)
@@ -1537,7 +1540,41 @@ export default function EditarPdf() {
     window.addEventListener('touchmove', handleMove, { passive: false })
     window.addEventListener('touchend', handleUp)
     window.addEventListener('touchcancel', handleUp)
-  }, [images, getClientXY])
+  }, [images, getClientXY, pushHistory])
+
+  // ── Resize images (8 handles, mouse + touch) ────────────
+  const handleImageResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number, handle: string) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const img = images.find(i => i.id === id)
+    if (!img) return
+    pushHistory() // undo restores the pre-resize geometry
+    setSelectedImage(id)
+    setSelectedBox(null)
+    const { clientX, clientY } = getClientXY(e)
+    const start = { x: clientX, y: clientY }
+    const s = { w: img.width, h: img.height, ix: img.x, iy: img.y }
+
+    const handleMove = (ev: MouseEvent | TouchEvent) => {
+      ev.preventDefault()
+      const c = getClientXY(ev)
+      // Free-form resize; shift (desktop) locks the aspect ratio
+      const next = computeResize(handle, c.clientX - start.x, c.clientY - start.y, s, ev.shiftKey)
+      setImages(prev => prev.map(i => (i.id === id ? { ...i, ...next } : i)))
+    }
+    const handleUp = () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    window.addEventListener('touchmove', handleMove, { passive: false })
+    window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
+  }, [images, getClientXY, pushHistory])
 
   // ── Drag extracted text items (OCR/text-layer) ──────────
   const handleExistingDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
@@ -2336,7 +2373,7 @@ export default function EditarPdf() {
                 >
                   {/* Drag handle - always visible */}
                   <div
-                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move touch-none"
+                    className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move touch-none touch-hit"
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleBoxDragStart(e, box.id)}
                     onTouchStart={e => handleBoxDragStart(e, box.id)}
@@ -2358,7 +2395,7 @@ export default function EditarPdf() {
                   </button>
                   {/* Width resize handle */}
                   <div
-                    className="absolute top-0 -right-1.5 w-2 h-full cursor-ew-resize opacity-0 group-hover:opacity-50 touch-none"
+                    className="absolute top-0 -right-1.5 w-2 h-full cursor-ew-resize opacity-0 group-hover:opacity-50 touch-none touch-hit-x"
                     style={{ background: 'var(--accent)', touchAction: 'none' }}
                     onMouseDown={e => {
                       e.stopPropagation()
@@ -2429,7 +2466,7 @@ export default function EditarPdf() {
                   {/* Drag handle + delete — hover on desktop, always visible when selected (touch) */}
                   <div className={`absolute -top-6 left-0 right-0 flex items-center transition-opacity ${selectedExisting === item.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}>
                     <div
-                      className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                      className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
                       style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none', touchAction: 'none' }}
                       onMouseDown={e => handleExistingDragStart(e, item.id)}
                       onTouchStart={e => handleExistingDragStart(e, item.id)}
@@ -2439,7 +2476,7 @@ export default function EditarPdf() {
                       </svg>
                     </div>
                     <button
-                      className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                      className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 touch-hit"
                       style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0 }}
                       onClick={e => { e.stopPropagation(); deleteExisting(item.id) }}
                     >
@@ -2509,7 +2546,7 @@ export default function EditarPdf() {
                 >
                   {/* Drag handle — visible on hover OR when selected */}
                   <div
-                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
+                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none touch-hit ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
                     onTouchStart={e => handleImageDragStart(e, img.id)}
@@ -2525,9 +2562,19 @@ export default function EditarPdf() {
                     onClick={e => { e.stopPropagation(); deleteImage(img.id) }}
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      <path strokeLinecap="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
+                  {/* Resize handles — only when selected (touch can't hover them in) */}
+                  {selectedImage === img.id && RESIZE_HANDLES.map(h => (
+                    <div
+                      key={h}
+                      className="absolute w-3 h-3 bg-sky-400 rounded-full cursor-pointer touch-hit z-10"
+                      style={resizeHandleStyle(h)}
+                      onMouseDown={e => handleImageResizeStart(e, img.id, h)}
+                      onTouchStart={e => handleImageResizeStart(e, img.id, h)}
+                    />
+                  ))}
                   <img
                     src={img.src}
                     alt="Inserted"
@@ -2569,7 +2616,7 @@ export default function EditarPdf() {
                       {/* Drag handle + hide — hover on desktop, sticky when selected */}
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
-                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
                           style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
                           onTouchStart={e => handleFieldDragStart(e, f)}
@@ -2579,7 +2626,7 @@ export default function EditarPdf() {
                           </svg>
                         </div>
                         <button
-                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 touch-hit"
                           style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
                           title="Ocultar campo"
                           onClick={e => { e.stopPropagation(); hideFormField(f) }}
@@ -2643,7 +2690,7 @@ export default function EditarPdf() {
                     >
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
-                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none"
+                          className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
                           style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
                           onTouchStart={e => handleFieldDragStart(e, f)}
@@ -2653,7 +2700,7 @@ export default function EditarPdf() {
                           </svg>
                         </div>
                         <button
-                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                          className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 touch-hit"
                           style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
                           title="Ocultar campo"
                           onClick={e => { e.stopPropagation(); hideFormField(f) }}
@@ -2713,7 +2760,7 @@ export default function EditarPdf() {
                   >
                     <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                       <div
-                        className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center"
+                        className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-hit"
                         style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
                         onMouseDown={e => handleFieldDragStart(e, f)}
                       >
@@ -2722,7 +2769,7 @@ export default function EditarPdf() {
                         </svg>
                       </div>
                       <button
-                        className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0"
+                        className="ml-auto px-1 py-0.5 rounded-t flex items-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 touch-hit"
                         style={{ background: 'var(--danger)', minWidth: 0, minHeight: 0, pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
                         title="Ocultar campo"
                         onClick={e => { e.stopPropagation(); hideFormField(f) }}

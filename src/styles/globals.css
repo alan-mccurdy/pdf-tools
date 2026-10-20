@@ -388,6 +388,25 @@ body {
 .touch-auto { touch-action: auto; }
 .touch-manipulation { touch-action: manipulation; }
 
+/* Larger touch targets for editor handles on phones/tablets: expand the
+   hit area with a pseudo-element WITHOUT changing the visual size.
+   .touch-hit-x expands horizontally only (for full-height bar handles). */
+@media (hover: none) and (pointer: coarse) {
+  .touch-hit {
+    position: relative; /* anchor the ::after even on static buttons */
+  }
+  .touch-hit::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+  }
+  .touch-hit-x::after {
+    content: '';
+    position: absolute;
+    inset: -12px 0;
+  }
+}
+
 /* ── Fallback Glass Classes for SVG/Time Travel ───────────────── */
 
 .glass-card {

@@ -4,6 +4,7 @@ import { PDFDocument } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
+import { getClientXY, computeResize, RESIZE_HANDLES, resizeHandleStyle } from '../utils/pointer'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -14,50 +15,7 @@ interface PlacedImage {
   imgSrc: string
 }
 
-/** Unified touch/mouse coordinates. */
-const getClientXY = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
-  if ('touches' in e && e.touches.length > 0) return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY }
-  if ('changedTouches' in e && e.changedTouches.length > 0) return { clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY }
-  return { clientX: (e as MouseEvent).clientX, clientY: (e as MouseEvent).clientY }
-}
-
-/** Resize math shared by the mouse and touch paths. */
-const computeResize = (
-  handle: string,
-  dx: number,
-  dy: number,
-  s: { w: number; h: number; ix: number; iy: number },
-  lockAspect: boolean,
-) => {
-  const minSize = 30
-  let newW = s.w
-  let newH = s.h
-  let newX = s.ix
-  let newY = s.iy
-
-  if (handle.includes('e')) newW = Math.max(minSize, s.w + dx)
-  if (handle.includes('w')) {
-    newW = Math.max(minSize, s.w - dx)
-    newX = s.ix + (s.w - newW)
-  }
-  if (handle.includes('s')) newH = Math.max(minSize, s.h + dy)
-  if (handle.includes('n')) {
-    newH = Math.max(minSize, s.h - dy)
-    newY = s.iy + (s.h - newH)
-  }
-
-  // Lock aspect ratio with shift
-  if (lockAspect) {
-    const aspect = s.w / s.h
-    if (Math.abs(dx) > Math.abs(dy)) {
-      newH = newW / aspect
-    } else {
-      newW = newH * aspect
-    }
-  }
-
-  return { x: newX, y: newY, width: newW, height: newH }
-}
+/** Unified touch/mouse coordinates + resize math live in utils/pointer. */
 
 export default function InsertarImagenes() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -346,16 +304,11 @@ export default function InsertarImagenes() {
                 {selectedId === img.id && (
                   <>
                     {/* Resize handles */}
-                    {['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'].map(h => (
+                    {RESIZE_HANDLES.map(h => (
                       <div
                         key={h}
-                        className="absolute w-3 h-3 bg-[var(--accent)] rounded-full cursor-pointer"
-                        style={{
-                          top: h.includes('n') ? -6 : h.includes('s') ? 'calc(100% - 6px)' : 'calc(50% - 6px)',
-                          left: h.includes('w') ? -6 : h.includes('e') ? 'calc(100% - 6px)' : 'calc(50% - 6px)',
-                          cursor: h === 'nw' || h === 'se' ? 'nwse-resize' : h === 'ne' || h === 'sw' ? 'nesw-resize' : h === 'n' || h === 's' ? 'ns-resize' : 'ew-resize',
-                          touchAction: 'none',
-                        }}
+                        className="absolute w-3 h-3 bg-[var(--accent)] rounded-full cursor-pointer touch-hit"
+                        style={resizeHandleStyle(h)}
                         onMouseDown={e => handleResizeMouseDown(e, img.id, h)}
                         onTouchStart={e => handleResizeTouchStart(e, img.id, h)}
                       />
@@ -363,7 +316,7 @@ export default function InsertarImagenes() {
 
                     {/* Delete button */}
                     <button
-                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 z-10"
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 z-10 touch-hit"
                       onClick={e => { e.stopPropagation(); handleDeleteImage(img.id) }}
                     >
                       X
