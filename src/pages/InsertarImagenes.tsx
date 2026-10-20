@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, degrees } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
-import { getClientXY, computeResize, RESIZE_HANDLES, resizeHandleStyle } from '../utils/pointer'
+import { getClientXY, computeResize, RESIZE_HANDLES, resizeHandleStyle, usePinchZoom } from '../utils/pointer'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -13,6 +13,8 @@ interface PlacedImage {
   x: number; y: number; width: number; height: number
   page: number; imgBytes: Uint8Array
   imgSrc: string
+  /** CSS-clockwise degrees */
+  rotation?: number
 }
 
 /** Unified touch/mouse coordinates + resize math live in utils/pointer. */
@@ -31,6 +33,49 @@ export default function InsertarImagenes() {
   const imgIdCounterRef = useRef(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const objectUrlsRef = useRef<Set<string>>(new Set())
+
+  // ── Undo / Redo (same snapshot approach as EditarPdf) ──
+  const [history, setHistory] = useState<PlacedImage[][]>([])
+  const [redoStack, setRedoStack] = useState<PlacedImage[][]>([])
+
+  const pushHistory = useCallback(() => {
+    // Snapshot the CURRENT state before the action mutates it
+    setHistory(h => [...(h.length >= 50 ? h.slice(h.length - 49) : h), images])
+    setRedoStack([])
+  }, [images])
+
+  const undo = useCallback(() => {
+    if (history.length === 0) return
+    const prev = history[history.length - 1]
+    setRedoStack(s => (s.length >= 50 ? s.slice(s.length - 49) : [...s, images]))
+    setHistory(h => h.slice(0, -1))
+    setImages(prev)
+    setSelectedId(null)
+  }, [history, images])
+
+  const redo = useCallback(() => {
+    if (redoStack.length === 0) return
+    const next = redoStack[redoStack.length - 1]
+    setHistory(h => (h.length >= 50 ? h.slice(h.length - 49) : [...h, images]))
+    setRedoStack(s => s.slice(0, -1))
+    setImages(next)
+    setSelectedId(null)
+  }, [redoStack, images])
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (desktop; phones use the toolbar buttons)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
+
+  // Two-finger pinch-zoom on the canvas (phone/tablet); desktop keeps the slider
+  const pinch = usePinchZoom(scale, setScale, 0.5, 3)
 
   useEffect(() => {
     if (!pdfFile) return
@@ -86,7 +131,8 @@ export default function InsertarImagenes() {
     const imgSrc = URL.createObjectURL(new Blob([bytes]))
     objectUrlsRef.current.add(imgSrc)
     const id = `img-${++imgIdCounterRef.current}`
-    setImages(prev => [...prev, { id, x: x - 75, y: y - 75, width: 150, height: 150, page: currentPage, imgBytes: bytes, imgSrc }])
+    pushHistory()
+    setImages(prev => [...prev, { id, x: x - 75, y: y - 75, width: 150, height: 150, page: currentPage, imgBytes: bytes, imgSrc, rotation: 0 }])
     setSelectedId(id)
   }
 
@@ -95,6 +141,7 @@ export default function InsertarImagenes() {
     setSelectedId(id)
     const img = images.find(i => i.id === id)
     if (!img) return
+    pushHistory() // undo restores the pre-drag position
     const rect = canvasRef.current!.getBoundingClientRect()
     setDragging({ id, offsetX: e.clientX - rect.left - img.x, offsetY: e.clientY - rect.top - img.y })
   }
@@ -103,6 +150,7 @@ export default function InsertarImagenes() {
     e.stopPropagation()
     const img = images.find(i => i.id === id)
     if (!img) return
+    pushHistory() // undo restores the pre-resize geometry
     setResizing({ id, handle, startX: e.clientX, startY: e.clientY, startW: img.width, startH: img.height, startImgX: img.x, startImgY: img.y })
   }
 
@@ -110,13 +158,16 @@ export default function InsertarImagenes() {
 
   const handleImageTouchStart = (e: React.TouchEvent, id: string) => {
     e.stopPropagation()
+    if (e.touches.length > 1) return // pinch, not drag
     const img = images.find(i => i.id === id)
     if (!img) return
     setSelectedId(id)
+    pushHistory() // undo restores the pre-drag position
     const rect = canvasRef.current!.getBoundingClientRect()
     const offsetX = e.touches[0].clientX - rect.left - img.x
     const offsetY = e.touches[0].clientY - rect.top - img.y
     const move = (ev: TouchEvent) => {
+      if (ev.touches.length > 1) return // second finger = pinch, freeze the drag
       ev.preventDefault() // block page scroll while dragging
       const c = getClientXY(ev)
       const r = canvasRef.current!.getBoundingClientRect()
@@ -136,12 +187,15 @@ export default function InsertarImagenes() {
 
   const handleResizeTouchStart = (e: React.TouchEvent, id: string, handle: string) => {
     e.stopPropagation()
+    if (e.touches.length > 1) return // pinch, not resize
     const img = images.find(i => i.id === id)
     if (!img) return
+    pushHistory() // undo restores the pre-resize geometry
     const t = e.touches[0]
     const start = { x: t.clientX, y: t.clientY }
     const s = { w: img.width, h: img.height, ix: img.x, iy: img.y }
     const move = (ev: TouchEvent) => {
+      if (ev.touches.length > 1) return // second finger = pinch, freeze the resize
       ev.preventDefault()
       const c = getClientXY(ev)
       const next = computeResize(handle, c.clientX - start.x, c.clientY - start.y, s, ev.shiftKey)
@@ -189,13 +243,27 @@ export default function InsertarImagenes() {
   }, [])
 
   const handleDeleteImage = (id: string) => {
-    const img = images.find(i => i.id === id)
-    if (img) {
-      URL.revokeObjectURL(img.imgSrc)
-      objectUrlsRef.current.delete(img.imgSrc)
-    }
+    // No URL.revokeObjectURL here: undo must be able to restore the image.
+    // URLs are revoked on "Limpiar todo" and on unmount.
+    pushHistory()
     setImages(prev => prev.filter(img => img.id !== id))
     if (selectedId === id) setSelectedId(null)
+  }
+
+  const handleDuplicateImage = (id: string) => {
+    const img = images.find(i => i.id === id)
+    if (!img) return
+    pushHistory()
+    const newId = `img-${++imgIdCounterRef.current}`
+    setImages(prev => [...prev, { ...img, id: newId, x: img.x + 16, y: img.y + 16 }])
+    setSelectedId(newId)
+  }
+
+  const handleRotateImage = (id: string) => {
+    pushHistory()
+    setImages(prev => prev.map(i =>
+      i.id === id ? { ...i, rotation: ((i.rotation ?? 0) + 90) % 360 } : i
+    ))
   }
 
   const handleDownload = async () => {
@@ -214,11 +282,23 @@ export default function InsertarImagenes() {
         }
         const page = pdfDoc.getPage(img.page)
         const { height } = page.getSize()
+        // Rotate around the image CENTER to match the CSS preview (which
+        // rotates around 50% 50%). pdf-lib rotates around the lower-left
+        // (x,y) of the drawn rect, CCW in degrees; CSS rotation is CW —
+        // so A = 360 - cssRotation and the origin is back-projected:
+        //   origin = center − R(A)·(W/2, H/2)
+        const W = img.width / scale
+        const H = img.height / scale
+        const cx = img.x / scale + W / 2
+        const cy = height - img.y / scale - H / 2
+        const A = (360 - ((img.rotation ?? 0) % 360)) % 360
+        const rad = (A * Math.PI) / 180
         page.drawImage(embedded, {
-          x: img.x / scale,
-          y: height - img.y / scale - img.height / scale,
-          width: img.width / scale,
-          height: img.height / scale,
+          x: cx - (W / 2) * Math.cos(rad) + (H / 2) * Math.sin(rad),
+          y: cy - (W / 2) * Math.sin(rad) - (H / 2) * Math.cos(rad),
+          width: W,
+          height: H,
+          rotate: degrees(A),
         })
       }
 
@@ -258,7 +338,7 @@ export default function InsertarImagenes() {
 
       {pdfFile && (
         <div className="mt-4">
-          {/* Zoom slider */}
+          {/* Zoom slider + undo/redo */}
           <div className="mb-3 flex items-center gap-3">
             <label className="text-sm" style={{ color: 'var(--text-secondary)' }}>Zoom:</label>
             <input
@@ -271,13 +351,38 @@ export default function InsertarImagenes() {
               className="flex-1 max-w-[200px]"
             />
             <span className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>{scale.toFixed(1)}x</span>
+            <button
+              className="spatial-btn-icon"
+              onClick={undo}
+              disabled={history.length === 0}
+              title="Deshacer (Ctrl+Z)"
+              style={{ opacity: history.length === 0 ? 0.4 : 1 }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 010 11H11" />
+              </svg>
+            </button>
+            <button
+              className="spatial-btn-icon"
+              onClick={redo}
+              disabled={redoStack.length === 0}
+              title="Rehacer (Ctrl+Shift+Z)"
+              style={{ opacity: redoStack.length === 0 ? 0.4 : 1 }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 000 11H13" />
+              </svg>
+            </button>
           </div>
 
+          {/* touchAction pan-y keeps single-finger page scroll; pinch is ours */}
           <div
             className="relative inline-block"
+            style={{ touchAction: 'pan-y' }}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            {...pinch}
           >
             <canvas
               ref={canvasRef}
@@ -298,6 +403,7 @@ export default function InsertarImagenes() {
                   src={img.imgSrc}
                   alt="Placed"
                   className="w-full h-full object-contain pointer-events-none"
+                  style={{ transform: img.rotation ? `rotate(${img.rotation}deg)` : undefined }}
                   draggable={false}
                 />
 
@@ -313,6 +419,29 @@ export default function InsertarImagenes() {
                         onTouchStart={e => handleResizeTouchStart(e, img.id, h)}
                       />
                     ))}
+
+                    {/* Rotate 90° */}
+                    <button
+                      className="absolute -top-2 -right-8 w-5 h-5 bg-sky-500 text-white rounded-full flex items-center justify-center hover:bg-sky-600 z-10 touch-hit"
+                      title="Rotar 90 grados"
+                      onClick={e => { e.stopPropagation(); handleRotateImage(img.id) }}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" />
+                      </svg>
+                    </button>
+
+                    {/* Duplicate */}
+                    <button
+                      className="absolute -top-2 -right-14 w-5 h-5 bg-sky-500 text-white rounded-full flex items-center justify-center hover:bg-sky-600 z-10 touch-hit"
+                      title="Duplicar"
+                      onClick={e => { e.stopPropagation(); handleDuplicateImage(img.id) }}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="9" y="9" width="13" height="13" rx="2" strokeWidth={2} />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                      </svg>
+                    </button>
 
                     {/* Delete button */}
                     <button
@@ -370,8 +499,9 @@ export default function InsertarImagenes() {
             {images.length > 0 && (
               <button
                 onClick={() => {
-                  images.forEach(img => URL.revokeObjectURL(img.imgSrc))
-                  objectUrlsRef.current.clear()
+                  // Keep the object URLs alive so undo can restore them;
+                  // they are all revoked by the unmount cleanup below.
+                  pushHistory()
                   setImages([])
                   setSelectedId(null)
                 }}

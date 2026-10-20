@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type React from 'react'
 
 /**
@@ -71,3 +72,65 @@ export const resizeHandleStyle = (h: string): React.CSSProperties => ({
     : 'ew-resize',
   touchAction: 'none',
 })
+
+/**
+ * Two-finger pinch-zoom for the PDF canvas. Attach the returned handlers to
+ * the canvas WRAPPER div (style it touchAction: 'pan-y' — that keeps
+ * single-finger vertical page scroll working while the browser itself cannot
+ * page-zoom, because 'pinch-zoom' is not listed in touch-action).
+ * Multi-touch guards elsewhere (overlay tap-to-create, drag/resize window
+ * listeners) must ignore events with >1 touches so a pinch never creates
+ * boxes or teleports elements.
+ */
+export function usePinchZoom(
+  scale: number,
+  setScale: React.Dispatch<React.SetStateAction<number>>,
+  min = 0.5,
+  max = 3,
+) {
+  const start = useRef<{ dist: number; scale: number } | null>(null)
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2) { start.current = null; return }
+    e.preventDefault()
+    const dx = e.touches[0].clientX - e.touches[1].clientX
+    const dy = e.touches[0].clientY - e.touches[1].clientY
+    start.current = { dist: Math.hypot(dx, dy) || 1, scale }
+  }
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2 || !start.current) return
+    e.preventDefault()
+    const dx = e.touches[0].clientX - e.touches[1].clientX
+    const dy = e.touches[0].clientY - e.touches[1].clientY
+    const next = start.current.scale * (Math.hypot(dx, dy) / start.current.dist)
+    setScale(Math.min(max, Math.max(min, next)))
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) start.current = null
+  }
+  return { onTouchStart, onTouchMove, onTouchEnd }
+}
+
+/**
+ * Eraser hit-test: is point (px,py) within radius r of any segment of the
+ * polyline (or the point itself for single-point strokes)?
+ */
+export const strokeHitTest = (
+  points: { x: number; y: number }[],
+  px: number,
+  py: number,
+  r: number,
+) => {
+  if (points.length === 0) return false
+  if (points.length === 1) return Math.hypot(px - points[0].x, py - points[0].y) <= r
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len2 = dx * dx + dy * dy
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2))
+    if (Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy)) <= r) return true
+  }
+  return false
+}

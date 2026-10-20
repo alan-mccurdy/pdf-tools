@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, rgb, StandardFonts, type PDFFont } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, rgb, StandardFonts, degrees, type PDFFont } from 'pdf-lib'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
 import DownloadButton from '../components/PDF/DownloadButton'
 import { extractWordsFromImage, type OcrWordBox } from '../utils/ocrService'
-import { computeResize, RESIZE_HANDLES, resizeHandleStyle } from '../utils/pointer'
+import { computeResize, RESIZE_HANDLES, resizeHandleStyle, usePinchZoom, strokeHitTest } from '../utils/pointer'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -36,6 +36,8 @@ interface ImageBox {
   height: number
   src: string
   page: number
+  /** CSS-clockwise degrees; optional because persisted states predate rotation */
+  rotation?: number
 }
 
 interface DrawStroke {
@@ -448,7 +450,7 @@ export default function EditarPdf() {
   const [italic, setItalic] = useState(false)
   const [underline, setUnderline] = useState(false)
   const [align, setAlign] = useState<'left' | 'center' | 'right'>('left')
-  const [mode, setMode] = useState<'text' | 'draw' | 'image'>('text')
+  const [mode, setMode] = useState<'text' | 'draw' | 'erase' | 'image'>('text')
   // Show the rendered PDF page behind the extracted text.
   // Default ON: replacement mode — design visible, OCR text in editable
   // white patches on top of the original text. OFF = text-only view.
@@ -1164,11 +1166,42 @@ export default function EditarPdf() {
     setRedoStack(s => s.slice(0, -1))
   }, [redoStack, boxes, images, strokes, existingTexts, formFields])
 
+  // ── Duplicate / rotate selected element (toolbar + Ctrl+D) ──
+  const duplicateSelected = useCallback(() => {
+    if (selectedBox !== null) {
+      const b = boxes.find(x => x.id === selectedBox)
+      if (!b) return
+      pushHistory()
+      const id = nextId.current++
+      setBoxes(prev => [...prev, { ...b, id, x: b.x + 16, y: b.y + 16 }])
+      setSelectedBox(id)
+    } else if (selectedImage !== null) {
+      const img = images.find(x => x.id === selectedImage)
+      if (!img) return
+      pushHistory()
+      const id = nextId.current++
+      setImages(prev => [...prev, { ...img, id, x: img.x + 16, y: img.y + 16 }])
+      setSelectedImage(id)
+    }
+  }, [selectedBox, selectedImage, boxes, images, pushHistory])
+
+  const rotateSelectedImage = useCallback(() => {
+    if (selectedImage === null) return
+    pushHistory()
+    setImages(prev => prev.map(img =>
+      img.id === selectedImage ? { ...img, rotation: ((img.rotation ?? 0) + 90) % 360 } : img
+    ))
+  }, [selectedImage, pushHistory])
+
+  // Two-finger pinch-zoom on the canvas (phone/tablet); desktop keeps the slider
+  const pinch = usePinchZoom(scale, setScale, 0.25, 3)
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected() }
       if (e.key === 'Delete' && selectedBox !== null) {
         pushHistory()
         setBoxes(prev => prev.filter(b => b.id !== selectedBox))
@@ -1187,12 +1220,14 @@ export default function EditarPdf() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, selectedBox, selectedImage, selectedExisting, pushHistory])
+  }, [undo, redo, duplicateSelected, selectedBox, selectedImage, selectedExisting, pushHistory])
 
   // ── Text box handlers ──────────────────────────────────
 
   const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if (mode !== 'text') return
+    // Second finger down = pinch starting; never spawn a text box for it
+    if ('touches' in e && e.touches.length > 1) return
     const target = e.target as HTMLElement
     if (target.closest('.editor-box')) return
     if (target.closest('.editor-image')) return
@@ -1296,7 +1331,7 @@ export default function EditarPdf() {
         const x = (canvas.width - w) / 2
         const y = (canvas.height - h) / 2
         pushHistory()
-        setImages(prev => [...prev, { id, x, y, width: w, height: h, src: reader.result as string, page: currentPage }])
+        setImages(prev => [...prev, { id, x, y, width: w, height: h, src: reader.result as string, page: currentPage, rotation: 0 }])
         // Auto-select so the move handle is immediately visible/active
         setSelectedImage(id)
       }
@@ -1385,7 +1420,7 @@ export default function EditarPdf() {
       const x = (canvasEl.width - w) / 2
       const y = canvasEl.height - h - 60 // Place near bottom
       pushHistory()
-      setImages(prev => [...prev, { id, x, y, width: w, height: h, src: dataUrl, page: currentPage }])
+      setImages(prev => [...prev, { id, x, y, width: w, height: h, src: dataUrl, page: currentPage, rotation: 0 }])
       // Auto-select so the move handle is immediately visible/active (touch
       // devices can't hover to reveal it, so the box otherwise looks stuck).
       setSelectedImage(id)
@@ -1408,16 +1443,48 @@ export default function EditarPdf() {
     return { x: (e as React.MouseEvent<HTMLCanvasElement>).clientX - rect.left, y: (e as React.MouseEvent<HTMLCanvasElement>).clientY - rect.top }
   }, [])
 
+  // Eraser: one pushHistory per gesture, hit-test delete on move.
+  // Radius is generous (+ stroke half-width) so fingers work on phones.
+  const erasingRef = useRef(false)
+  const eraseAt = useCallback((x: number, y: number) => {
+    const radius = 14
+    setStrokes(prev => prev.filter(s =>
+      s.page !== currentPage || !strokeHitTest(s.points, x, y, radius + s.size / 2)
+    ))
+  }, [currentPage])
+
   const handleDrawStart = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (mode !== 'draw') return
+    // Second finger down = pinch starting; never start drawing/erasing with it
+    if ('touches' in e && e.touches.length > 1) return
     e.preventDefault()
+    if (mode === 'erase') {
+      erasingRef.current = true
+      pushHistory() // undo restores every stroke removed in this gesture
+      const { x, y } = getDrawCoords(e)
+      eraseAt(x, y)
+      return
+    }
+    if (mode !== 'draw') return
     isDrawing.current = true
     currentStroke.current = [getDrawCoords(e)]
-  }, [mode, getDrawCoords])
+  }, [mode, getDrawCoords, eraseAt, pushHistory])
 
   const handleDrawMove = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current || mode !== 'draw') return
+    // Second finger landing mid-gesture: cancel instead of glitching
+    if ('touches' in e && e.touches.length > 1) {
+      isDrawing.current = false
+      currentStroke.current = []
+      erasingRef.current = false
+      return
+    }
     e.preventDefault()
+    if (mode === 'erase') {
+      if (!erasingRef.current) return
+      const { x, y } = getDrawCoords(e)
+      eraseAt(x, y)
+      return
+    }
+    if (!isDrawing.current || mode !== 'draw') return
     currentStroke.current.push(getDrawCoords(e))
     // Live preview
     const canvas = drawCanvasRef.current
@@ -1435,9 +1502,10 @@ export default function EditarPdf() {
       ctx.lineTo(curr.x, curr.y)
       ctx.stroke()
     }
-  }, [mode, drawColor, drawSize, getDrawCoords])
+  }, [mode, drawColor, drawSize, getDrawCoords, eraseAt])
 
   const handleDrawEnd = useCallback((_e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (erasingRef.current) { erasingRef.current = false; return }
     if (!isDrawing.current) return
     isDrawing.current = false
     if (currentStroke.current.length >= 2) {
@@ -1480,6 +1548,7 @@ export default function EditarPdf() {
     setSelectedImage(null)
 
     const handleMove = (ev: MouseEvent | TouchEvent) => {
+      if ('touches' in ev && ev.touches.length > 1) return // pinch, not drag
       if (!dragRef.current) return
       const { clientX: cx, clientY: cy } = getClientXY(ev)
       const dx = cx - dragRef.current.startX
@@ -1517,6 +1586,7 @@ export default function EditarPdf() {
     setSelectedBox(null)
 
     const handleMove = (ev: MouseEvent | TouchEvent) => {
+      if ('touches' in ev && ev.touches.length > 1) return // pinch, not drag
       if (!imgDragRef.current) return
       const { clientX: cx, clientY: cy } = getClientXY(ev)
       const dx = cx - imgDragRef.current.startX
@@ -1556,6 +1626,7 @@ export default function EditarPdf() {
     const s = { w: img.width, h: img.height, ix: img.x, iy: img.y }
 
     const handleMove = (ev: MouseEvent | TouchEvent) => {
+      if ('touches' in ev && ev.touches.length > 1) return // pinch, not resize
       ev.preventDefault()
       const c = getClientXY(ev)
       // Free-form resize; shift (desktop) locks the aspect ratio
@@ -1590,6 +1661,7 @@ export default function EditarPdf() {
     setSelectedField(null)
     let pushed = false
     const handleMove = (ev: MouseEvent | TouchEvent) => {
+      if ('touches' in ev && ev.touches.length > 1) return // pinch, not drag
       if (!existingDragRef.current) return
       const { clientX: cx, clientY: cy } = getClientXY(ev)
       const dx = cx - existingDragRef.current.startX
@@ -1635,6 +1707,7 @@ export default function EditarPdf() {
     setSelectedExisting(null)
     let pushed = false
     const handleMove = (ev: MouseEvent | TouchEvent) => {
+      if ('touches' in ev && ev.touches.length > 1) return // pinch, not drag
       if (!fieldDragRef.current) return
       const { clientX: cx, clientY: cy } = getClientXY(ev)
       const dx = cx - fieldDragRef.current.startX
@@ -2038,11 +2111,23 @@ export default function EditarPdf() {
           } else {
             embedded = await pdfDoc.embedJpg(imgBytes)
           }
+          // Rotate around the image CENTER to match the CSS preview (which
+          // rotates around 50% 50%). pdf-lib rotates around the lower-left
+          // (x,y) of the drawn rect, CCW in degrees; CSS rotation is CW —
+          // so A = 360 - cssRotation and the origin is back-projected:
+          //   origin = center − R(A)·(W/2, H/2)
+          const W = img.width / scale
+          const H = img.height / scale
+          const cx = img.x / scale + W / 2
+          const cy = height - (img.y + img.height) / scale + H / 2
+          const A = (360 - ((img.rotation ?? 0) % 360)) % 360
+          const rad = (A * Math.PI) / 180
           page.drawImage(embedded, {
-            x: img.x / scale,
-            y: height - (img.y + img.height) / scale,
-            width: img.width / scale,
-            height: img.height / scale,
+            x: cx - (W / 2) * Math.cos(rad) + (H / 2) * Math.sin(rad),
+            y: cy - (W / 2) * Math.sin(rad) - (H / 2) * Math.cos(rad),
+            width: W,
+            height: H,
+            rotate: degrees(A),
           })
         } catch { /* skip broken images */ }
       }
@@ -2077,6 +2162,34 @@ export default function EditarPdf() {
 
   const Toolbar = () => (
     <div className="spatial-toolbar mb-4 flex-wrap gap-y-2">
+      {/* Undo / Redo — buttons exist because mobile has no keyboard */}
+      <div className="flex items-center gap-1">
+        <button
+          className="spatial-btn-icon"
+          onClick={undo}
+          disabled={history.length === 0}
+          title="Deshacer (Ctrl+Z)"
+          style={{ opacity: history.length === 0 ? 0.4 : 1 }}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 010 11H11" />
+          </svg>
+        </button>
+        <button
+          className="spatial-btn-icon"
+          onClick={redo}
+          disabled={redoStack.length === 0}
+          title="Rehacer (Ctrl+Shift+Z)"
+          style={{ opacity: redoStack.length === 0 ? 0.4 : 1 }}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 000 11H13" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="spatial-toolbar-separator" />
+
       {/* Mode toggle */}
       <div className="flex items-center gap-1">
         <button
@@ -2095,6 +2208,15 @@ export default function EditarPdf() {
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+        <button
+          className={`spatial-btn-icon ${mode === 'erase' ? 'active' : ''}`}
+          onClick={() => setMode('erase')}
+          title="Borrador (pasa el dedo sobre los trazos)"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21M22 21H7m5-10 9 9" />
           </svg>
         </button>
         <button
@@ -2132,6 +2254,31 @@ export default function EditarPdf() {
             </svg>
           )}
         </button>
+        {/* Duplicate selected box/image */}
+        {(selectedBox !== null || selectedImage !== null) && (
+          <button
+            className="spatial-btn-icon"
+            onClick={duplicateSelected}
+            title="Duplicar seleccion (Ctrl+D)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="9" y="9" width="13" height="13" rx="2" strokeWidth={2} />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+          </button>
+        )}
+        {/* Rotate selected image 90° CW */}
+        {selectedImage !== null && (
+          <button
+            className="spatial-btn-icon"
+            onClick={rotateSelectedImage}
+            title="Rotar 90 grados"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="spatial-toolbar-separator" />
@@ -2332,10 +2479,13 @@ export default function EditarPdf() {
             </div>
           )}
 
-          {/* PDF + Overlay — canvas stays visible; edited text is whiteed out locally */}
+          {/* PDF + Overlay — canvas stays visible; edited text is whiteed out locally.
+              touchAction pan-y: single-finger page scroll still works, but the
+              browser cannot page-zoom (we own pinch via usePinchZoom). */}
           <div
             className="relative inline-block rounded-xl overflow-hidden"
-            style={{ border: '1px solid var(--border-default)', background: showBackground ? undefined : '#ffffff' }}
+            style={{ border: '1px solid var(--border-default)', background: showBackground ? undefined : '#ffffff', touchAction: 'pan-y' }}
+            {...pinch}
           >
             <canvas
               ref={canvasRef}
@@ -2345,7 +2495,7 @@ export default function EditarPdf() {
             <canvas
               ref={drawCanvasRef}
               className="absolute inset-0 touch-none"
-              style={{ cursor: mode === 'draw' ? 'crosshair' : 'default', pointerEvents: mode === 'draw' ? 'auto' : 'none', touchAction: mode === 'draw' ? 'none' : 'auto' }}
+              style={{ cursor: mode === 'draw' || mode === 'erase' ? 'crosshair' : 'default', pointerEvents: mode === 'draw' || mode === 'erase' ? 'auto' : 'none', touchAction: mode === 'draw' || mode === 'erase' ? 'none' : 'auto' }}
               onMouseDown={handleDrawStart}
               onMouseMove={handleDrawMove}
               onMouseUp={handleDrawEnd}
@@ -2402,6 +2552,7 @@ export default function EditarPdf() {
                       const startX = e.clientX
                       const startW = box.width
                       const onMove = (ev: MouseEvent | TouchEvent) => {
+                        if ('touches' in ev && ev.touches.length > 1) return // pinch, not resize
                         const cx = 'touches' in ev ? ev.touches[0].clientX : ev.clientX
                         updateBoxWidth(box.id, startW + (cx - startX))
                       }
@@ -2555,6 +2706,19 @@ export default function EditarPdf() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
                     </svg>
                   </div>
+                  {/* Rotate 90° — sticky when selected (touch) */}
+                  {selectedImage === img.id && (
+                    <button
+                      className="absolute -top-6 right-6 w-5 h-5 rounded-t transition-opacity flex items-center justify-center text-white cursor-pointer min-w-0 min-h-0 touch-hit"
+                      style={{ background: 'var(--surface-3)', border: '1px solid #38bdf8', borderBottom: 'none', minWidth: 0, minHeight: 0 }}
+                      onClick={e => { e.stopPropagation(); rotateSelectedImage() }}
+                      title="Rotar 90 grados"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Delete — visible on hover OR when selected */}
                   <button
                     className={`absolute -top-6 right-0 w-5 h-5 rounded-t transition-opacity flex items-center justify-center text-white text-[10px] cursor-pointer min-w-0 min-h-0 ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
@@ -2579,7 +2743,7 @@ export default function EditarPdf() {
                     src={img.src}
                     alt="Inserted"
                     className="pointer-events-none select-none"
-                    style={{ width: img.width, height: img.height }}
+                    style={{ width: img.width, height: img.height, transform: img.rotation ? `rotate(${img.rotation}deg)` : undefined }}
                     draggable={false}
                   />
                 </div>
