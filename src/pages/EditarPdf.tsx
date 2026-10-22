@@ -1579,11 +1579,14 @@ export default function EditarPdf() {
     e.preventDefault()
     const img = images.find(i => i.id === id)
     if (!img) return
-    pushHistory() // undo restores the pre-drag position
     const { clientX, clientY } = getClientXY(e)
     imgDragRef.current = { id, startX: clientX, startY: clientY, imgX: img.x, imgY: img.y }
     setSelectedImage(id)
     setSelectedBox(null)
+    // History is pushed on the FIRST real movement: whole-box drag means every
+    // selection click also lands here, and a no-op entry would pollute undo.
+    // pushHistory's closure still snapshots the drag-start state → correct.
+    let historyPushed = false
 
     const handleMove = (ev: MouseEvent | TouchEvent) => {
       if ('touches' in ev && ev.touches.length > 1) return // pinch, not drag
@@ -1591,6 +1594,10 @@ export default function EditarPdf() {
       const { clientX: cx, clientY: cy } = getClientXY(ev)
       const dx = cx - imgDragRef.current.startX
       const dy = cy - imgDragRef.current.startY
+      if (!historyPushed && (dx !== 0 || dy !== 0)) {
+        historyPushed = true
+        pushHistory() // undo restores the pre-drag position
+      }
       setImages(prev => prev.map(i =>
         i.id === imgDragRef.current!.id
           ? { ...i, x: imgDragRef.current!.imgX + dx, y: imgDragRef.current!.imgY + dy }
@@ -1611,6 +1618,17 @@ export default function EditarPdf() {
     window.addEventListener('touchend', handleUp)
     window.addEventListener('touchcancel', handleUp)
   }, [images, getClientXY, pushHistory])
+
+  // Whole-box drag for images/signatures (same affordance as Insertar
+  // Imágenes): grabbing anywhere inside the box moves it, so the user never
+  // has to hunt for the small tab. Skips buttons (delete/rotate) and
+  // multi-touch (the pinch-zoom handler on the outer container owns it —
+  // a second finger must be allowed to bubble).
+  const startImageBoxDrag = useCallback((e: React.MouseEvent | React.TouchEvent, id: number) => {
+    if ('touches' in e && e.touches.length > 1) return
+    if ((e.target as HTMLElement).closest('button')) return
+    handleImageDragStart(e, id)
+  }, [handleImageDragStart])
 
   // ── Resize images (8 handles, mouse + touch) ────────────
   const handleImageResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: number, handle: string) => {
@@ -2687,24 +2705,29 @@ export default function EditarPdf() {
                 )
               })}
 
-              {/* Images */}
+              {/* Images + signatures (a signature is just an ImageBox) */}
               {currentImages.map(img => (
                 <div
                   key={img.id}
-                  className={`editor-image absolute group cursor-pointer ${selectedImage === img.id ? 'ring-2 ring-sky-400' : ''}`}
+                  className={`editor-image absolute group cursor-move ${selectedImage === img.id ? 'ring-2 ring-sky-400' : ''}`}
                   style={{ left: img.x, top: img.y }}
                   onClick={e => { e.stopPropagation(); setSelectedImage(img.id); setSelectedBox(null) }}
+                  onMouseDown={e => startImageBoxDrag(e, img.id)}
+                  onTouchStart={e => startImageBoxDrag(e, img.id)}
                 >
                   {/* Drag handle — visible on hover OR when selected */}
                   <div
-                    className={`absolute -top-6 left-0 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none touch-hit ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
+                    className={`absolute -top-6 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none touch-hit ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
                     style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
                     onTouchStart={e => handleImageDragStart(e, img.id)}
+                    title="Mover: arrastra desde aqui o desde cualquier punto de la imagen"
                   >
-                    <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                    {/* 4-arrows move icon: marks the grab point */}
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 9L2 12l3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
                     </svg>
+                    <span>mover</span>
                   </div>
                   {/* Rotate 90° — sticky when selected (touch) */}
                   {selectedImage === img.id && (
