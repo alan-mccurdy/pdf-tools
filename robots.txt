@@ -1,3 +1,10 @@
 User-agent: *
 Allow: /
 Sitemap: https://alan-mccurdy.github.io/pdf-tools/sitemap.xml
+
+# Crawl-delay for respectful crawling
+Crawl-delay: 10
+
+# Disallow admin/private paths (none in this SPA)
+# Disallow: /admin/
+# Disallow: /api/

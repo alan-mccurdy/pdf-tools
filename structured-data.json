@@ -1,0 +1,157 @@
+[
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Editor PDF Online Gratis",
+    "description": "Herramientas PDF gratis: editar, unir, separar, rotar, comprimir y más. 100% en tu navegador, sin subir archivos.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/"
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Editar PDF Online",
+    "description": "Escribe texto, añade imágenes, firma y anota PDFs gratis. Editor completo en tu navegador.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/editar-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/editar-pdf",
+      "name": "Editar PDF Online"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Unir PDFs Online",
+    "description": "Combina múltiples archivos PDF en uno solo. Reordena páginas y descarga gratis.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/unir-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/unir-pdf",
+      "name": "Unir PDFs Online"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Convertir Word a PDF",
+    "description": "Convierte documentos .docx a PDF gratis. Mantiene el formato original.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/word-a-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/word-a-pdf",
+      "name": "Convertir Word a PDF"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Convertir PDF a Word",
+    "description": "Convierte PDF a .docx editable gratis. Extrae texto y estructura.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/pdf-a-word",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/pdf-a-word",
+      "name": "Convertir PDF a Word"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Separar PDF Online",
+    "description": "Extrae páginas de un PDF y guárdalas como archivos separados. Gratis y rápido.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/separar-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/separar-pdf",
+      "name": "Separar PDF Online"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Rotar PDF Online",
+    "description": "Rota páginas de PDF 90°, 180° o 270°. Gratis y sin instalar nada.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/rotar-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/rotar-pdf",
+      "name": "Rotar PDF Online"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Comprimir PDF Online",
+    "description": "Reduce el tamaño de tus PDFs manteniendo la calidad. Múltiples presets.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/comprimir-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/comprimir-pdf",
+      "name": "Comprimir PDF Online"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Eliminar Páginas de PDF",
+    "description": "Borra páginas de un PDF online gratis. Selecciona y elimina lo que no necesitas.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/eliminar-paginas",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/eliminar-paginas",
+      "name": "Eliminar Páginas de PDF"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Insertar Imágenes en PDF",
+    "description": "Añade imágenes, firmas o sellos a tus PDFs. Editor visual gratuito.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/insertar-imagenes",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/insertar-imagenes",
+      "name": "Insertar Imágenes en PDF"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "OCR PDF - Extraer Texto",
+    "description": "Convierte PDFs escaneados a texto editable con OCR. Español + Inglés.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/ocr-pdf",
+    "potentialAction": {
+      "@type": "UseAction",
+      "target": "https://alan-mccurdy.github.io/pdf-tools/ocr-pdf",
+      "name": "OCR PDF - Extraer Texto"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Política de Privacidad",
+    "description": "Cómo protegemos tus datos. Los archivos nunca salen de tu dispositivo.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/privacidad"
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Términos de Uso",
+    "description": "Condiciones de uso de PDF Tools. Servicio gratuito sin garantías.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/terminos"
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Acerca de PDF Tools",
+    "description": "Proyecto open-source de herramientas PDF gratuitas. Hecho con React + pdf-lib.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/acerca"
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Contacto",
+    "description": "Reporta bugs, sugiere funciones o colabora en GitHub.",
+    "url": "https://alan-mccurdy.github.io/pdf-tools/contacto"
+  }
+]
