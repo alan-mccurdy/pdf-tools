@@ -2,23 +2,16 @@ import { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import PDFToolLayout from '../components/Layout/PDFToolLayout'
 import PDFUploader from '../components/PDF/PDFUploader'
-
+import { pdfToDocx } from '../utils/pdfToDocx'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
-
-interface TextLine {
-  text: string
-  fontSize: number
-  bold: boolean
-  italic: boolean
-  y: number
-}
 
 export default function PdfAWord() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [converting, setConverting] = useState(false)
   const [pageCount, setPageCount] = useState(0)
+  const [convertError, setConvertError] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // Render preview
@@ -44,79 +37,15 @@ export default function PdfAWord() {
   const handleConvert = async () => {
     if (!file) return
     setConverting(true)
+    setConvertError(null)
     try {
       // Lazy load docx library (~740KB)
       const docxModule = await import('docx')
-      const { Document, Packer, Paragraph, TextRun, convertInchesToTwip } = docxModule
 
       const bytes = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
-      const allLines: TextLine[] = []
+      const { blob } = await pdfToDocx(pdf, docxModule)
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const textContent = await page.getTextContent()
-
-        // Group text items into lines by Y-coordinate
-        const items = textContent.items.filter((item: any) => item.str && item.str.trim() && item.transform) as any[]
-        const lineMap = new Map<number, any[]>()
-
-        for (const item of items) {
-          const y = Math.round(item.transform[5])
-          if (!lineMap.has(y)) lineMap.set(y, [])
-          lineMap.get(y)!.push(item)
-        }
-
-        // Sort lines top-to-bottom
-        const sortedY = Array.from(lineMap.keys()).sort((a, b) => b - a)
-
-        for (const y of sortedY) {
-          const lineItems = lineMap.get(y)!.sort((a: any, b: any) => a.transform[4] - b.transform[4])
-          const lineText = lineItems.map((item: any) => item.str).join(' ')
-
-          // Detect formatting from font name
-          const fontName = lineItems[0]?.fontName || ''
-          const fontSize = Math.round(lineItems[0]?.height || 12)
-          const bold = /bold/i.test(fontName) || /bold/i.test(lineItems[0]?.font?.name || '')
-          const italic = /italic|oblique/i.test(fontName) || /italic/i.test(lineItems[0]?.font?.name || '')
-
-          allLines.push({ text: lineText, fontSize, bold, italic, y })
-        }
-
-        // Add page break between pages (except last)
-        if (i < pdf.numPages) {
-          allLines.push({ text: '', fontSize: 12, bold: false, italic: false, y: -1 })
-        }
-      }
-
-      // Build docx paragraphs
-      const paragraphs = allLines.map(line => {
-        if (line.text === '') {
-          return new Paragraph({ spacing: { after: convertInchesToTwip(0.2) } })
-        }
-
-        const runs = [new TextRun({
-          text: line.text,
-          bold: line.bold,
-          italics: line.italic,
-          size: line.fontSize * 2, // half-points
-          font: 'Arial',
-        })]
-
-        return new Paragraph({
-          children: runs,
-          spacing: { after: convertInchesToTwip(0.1) },
-        })
-      })
-
-      const doc = new Document({
-        sections: [{
-          properties: {},
-          children: paragraphs,
-        }],
-      })
-
-      const blob = await Packer.toBlob(doc)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -124,7 +53,7 @@ export default function PdfAWord() {
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 5000)
     } catch (err: any) {
-      alert('Error al convertir: ' + err.message)
+      setConvertError(err.message || 'Error al convertir')
     } finally {
       setConverting(false)
     }
@@ -172,6 +101,12 @@ export default function PdfAWord() {
               </button>
             </div>
           </div>
+
+          {convertError && (
+            <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+              Error: {convertError}
+            </div>
+          )}
 
           {/* Preview */}
           <div className="spatial-card-static p-4">
