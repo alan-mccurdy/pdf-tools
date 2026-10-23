@@ -2542,7 +2542,7 @@ export default function EditarPdf() {
                   {/* Drag handle - always visible */}
                   <div
                     className="absolute -top-7 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t opacity-100 transition-opacity cursor-move touch-none touch-hit"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none', touchAction: 'none' }}
+                    style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid #38bdf8', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleBoxDragStart(e, box.id)}
                     onTouchStart={e => handleBoxDragStart(e, box.id)}
                   >
@@ -2636,7 +2636,7 @@ export default function EditarPdf() {
                   <div className={`absolute -top-6 left-0 right-0 flex items-center transition-opacity ${selectedExisting === item.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}>
                     <div
                       className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
-                      style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none', touchAction: 'none' }}
+                      style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid #10b981', borderBottom: 'none', touchAction: 'none' }}
                       onMouseDown={e => handleExistingDragStart(e, item.id)}
                       onTouchStart={e => handleExistingDragStart(e, item.id)}
                     >
@@ -2806,7 +2806,7 @@ export default function EditarPdf() {
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
                           className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
-                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
+                          style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
                           onTouchStart={e => handleFieldDragStart(e, f)}
                         >
@@ -2880,7 +2880,7 @@ export default function EditarPdf() {
                       <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                         <div
                           className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-none touch-hit"
-                          style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
+                          style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto', touchAction: 'none' }}
                           onMouseDown={e => handleFieldDragStart(e, f)}
                           onTouchStart={e => handleFieldDragStart(e, f)}
                         >
@@ -2950,7 +2950,7 @@ export default function EditarPdf() {
                     <div className={`absolute -top-5 left-0 right-0 flex items-center transition-opacity ${chromeVisible}`}>
                       <div
                         className="px-1.5 py-0.5 text-[9px] rounded-t cursor-move flex items-center touch-hit"
-                        style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
+                        style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid #0ea5e9', borderBottom: 'none', pointerEvents: mode === 'draw' ? 'none' : 'auto' }}
                         onMouseDown={e => handleFieldDragStart(e, f)}
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

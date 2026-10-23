@@ -562,6 +562,14 @@ input[type="number"].w-14, input[type="text"].w-14 {
   font-size: 0.75rem;
 }
 
+/* Column layout: children must fill the card width. With the inherited
+   align-items:center they get their intrinsic width (~400px+), which
+   defeats truncate and overflows the whole page horizontally. */
+.house-ad-sidebar .flex-1 {
+  width: 100%;
+  min-width: 0;
+}
+
 .house-ad-bottom {
   width: 100%;
   min-height: 80px;
