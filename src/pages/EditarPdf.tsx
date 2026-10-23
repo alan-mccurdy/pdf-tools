@@ -2718,7 +2718,7 @@ export default function EditarPdf() {
                   {/* Drag handle — visible on hover OR when selected */}
                   <div
                     className={`absolute -top-6 left-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] rounded-t cursor-move transition-opacity touch-none touch-hit ${selectedImage === img.id ? 'opacity-100 pointer-events-auto' : 'opacity-0 group-hover:opacity-100 pointer-events-none [@media(hover:hover)]:group-hover:pointer-events-auto'}`}
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderBottom: 'none', touchAction: 'none' }}
+                    style={{ background: 'rgba(15, 23, 42, 0.92)', color: 'var(--text-secondary)', border: '1px solid rgba(56, 189, 248, 0.55)', borderBottom: 'none', touchAction: 'none' }}
                     onMouseDown={e => handleImageDragStart(e, img.id)}
                     onTouchStart={e => handleImageDragStart(e, img.id)}
                     title="Mover: arrastra desde aqui o desde cualquier punto de la imagen"
@@ -2729,11 +2729,13 @@ export default function EditarPdf() {
                     </svg>
                     <span>mover</span>
                   </div>
-                  {/* Rotate 90° — sticky when selected (touch) */}
+                  {/* Rotate 90° — sticky when selected (touch). Solid fill:
+                      the old translucent white bg made the white icon
+                      invisible on white PDF pages ("cuadrito sin icono"). */}
                   {selectedImage === img.id && (
                     <button
                       className="absolute -top-6 right-6 w-5 h-5 rounded-t transition-opacity flex items-center justify-center text-white cursor-pointer min-w-0 min-h-0 touch-hit"
-                      style={{ background: 'var(--surface-3)', border: '1px solid #38bdf8', borderBottom: 'none', minWidth: 0, minHeight: 0 }}
+                      style={{ background: '#0284c7', border: '1px solid #38bdf8', borderBottom: 'none', minWidth: 0, minHeight: 0 }}
                       onClick={e => { e.stopPropagation(); rotateSelectedImage() }}
                       title="Rotar 90 grados"
                     >
